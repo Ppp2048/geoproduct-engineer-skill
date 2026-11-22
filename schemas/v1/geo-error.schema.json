@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Ppp2048/geoproduct-engineer-skill/main/schemas/v1/geo-error.schema.json",
+  "$defs": {
+    "ErrorCode": {
+      "enum": [
+        "invalid_input",
+        "invalid_spec",
+        "unknown_stage",
+        "not_found",
+        "path_not_allowed",
+        "too_large",
+        "timeout",
+        "cancelled",
+        "rate_limited",
+        "provider_unavailable",
+        "provider_error",
+        "policy_refused",
+        "auth_missing",
+        "capability_unsupported",
+        "confirmation_required",
+        "quality_gate_failed",
+        "stage_failed",
+        "internal"
+      ],
+      "title": "ErrorCode",
+      "type": "string"
+    },
+    "JsonValue": {}
+  },
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "$ref": "#/$defs/ErrorCode"
+    },
+    "message": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "stage": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stage"
+    },
+    "retryable": {
+      "default": false,
+      "title": "Retryable",
+      "type": "boolean"
+    },
+    "details": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Details",
+      "type": "object"
+    },
+    "hint": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Hint"
+    }
+  },
+  "required": [
+    "code",
+    "message"
+  ],
+  "title": "GeoError",
+  "type": "object"
+}

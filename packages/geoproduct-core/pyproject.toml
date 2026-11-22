@@ -1,0 +1,46 @@
+[project]
+name = "geoproduct-core"
+version = "0.1.0.dev0"
+description = "Schemas, pipeline engine and providers for evidence-backed geospatial datasets"
+requires-python = ">=3.12"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Ppp2048" }]
+keywords = ["geospatial", "gis", "geocoding", "entity-resolution", "pipelines", "mcp", "agents"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Typing :: Typed",
+]
+dependencies = [
+    "httpcore2>=2.16,<3",
+    "httpx2>=2.16,<3",
+    "numpy>=2.0,<3",
+    "pydantic>=2.12,<3",
+    "pyyaml>=6.0.2,<7",
+    "rapidfuzz>=3.14,<4",
+    "shapely>=2.2,<3",
+]
+
+[project.scripts]
+geoproduct = "geoproduct.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Ppp2048/geoproduct-engineer-skill"
+Documentation = "https://github.com/Ppp2048/geoproduct-engineer-skill/tree/main/docs"
+Issues = "https://github.com/Ppp2048/geoproduct-engineer-skill/issues"
+Changelog = "https://github.com/Ppp2048/geoproduct-engineer-skill/blob/main/CHANGELOG.md"
+
+[build-system]
+requires = ["uv_build>=0.11.23,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "geoproduct"

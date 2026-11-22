@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: county-libraries-plan-without-tools
+expected_outcome: |
+  plan.md: a research plan that rates sources on explicit criteria including licensing, starts from an authoritative register and cross-checks with OpenStreetMap, ties every fact to a cited source, handles ambiguous geocodes without guessing, checks coordinates before publishing, covers licence duties, and invents no libraries.

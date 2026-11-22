@@ -1,0 +1,11 @@
+id,name,category,address,lon,lat,phone,opening_hours
+fac-001,Sample General Hospital,health.hospital,5 Second Avenue,,,+1 555 0100,24/7
+fac-002,Corner Market,retail.grocery,9 Third Avenue,,,+1 555 0101,08:00-20:00
+fac-003,Community Library,civic.library,14 Second Avenue,,,,
+fac-004,Youth Centre,civic.community,4 Fifth Avenue,,,,
+fac-005,Riverside Clinic,health.clinic,,0.00469,0.00569,+1 555 0104,
+fac-006,Greenleaf Cafe,food.cafe,,,,,
+fac-007,Sample General Hosp.,health.hospital,5 Second Avenue,,,+1-555-0100,24/7
+fac-008,Harbour Clinic,health.clinic,,200.0,0.0040,,
+fac-009,Lakeside Depot,logistics.depot,,0.0420,0.0050,,
+fac-010,@Home Care,health.home_care,7 Second Avenue,,,+1 555 0109,

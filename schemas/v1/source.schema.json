@@ -1,0 +1,272 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Ppp2048/geoproduct-engineer-skill/main/schemas/v1/source.schema.json",
+  "$defs": {
+    "Rating": {
+      "additionalProperties": false,
+      "description": "0 = unacceptable or unknown, 1 = weak, 2 = adequate, 3 = strong.",
+      "properties": {
+        "score": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Score",
+          "type": "integer"
+        },
+        "rationale": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "score",
+        "rationale"
+      ],
+      "title": "Rating",
+      "type": "object"
+    },
+    "SourceEvaluation": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "$ref": "#/$defs/Rating"
+        },
+        "accuracy": {
+          "$ref": "#/$defs/Rating"
+        },
+        "freshness": {
+          "$ref": "#/$defs/Rating"
+        },
+        "coverage": {
+          "$ref": "#/$defs/Rating"
+        },
+        "licensing": {
+          "$ref": "#/$defs/Rating"
+        },
+        "geographic_precision": {
+          "$ref": "#/$defs/Rating"
+        },
+        "verifiability": {
+          "$ref": "#/$defs/Rating"
+        },
+        "evaluated_by": {
+          "default": "agent",
+          "enum": [
+            "agent",
+            "user",
+            "rule"
+          ],
+          "title": "Evaluated By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "authority",
+        "accuracy",
+        "freshness",
+        "coverage",
+        "licensing",
+        "geographic_precision",
+        "verifiability"
+      ],
+      "title": "SourceEvaluation",
+      "type": "object"
+    },
+    "SourceTier": {
+      "enum": [
+        "high",
+        "medium",
+        "low",
+        "unusable"
+      ],
+      "title": "SourceTier",
+      "type": "string"
+    },
+    "SourceType": {
+      "enum": [
+        "official_government",
+        "official_organisation",
+        "osm",
+        "open_data_portal",
+        "public_api",
+        "commercial_api",
+        "document",
+        "user_file",
+        "other"
+      ],
+      "title": "SourceType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "geoproduct/v1",
+      "default": "geoproduct/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "type": {
+      "$ref": "#/$defs/SourceType"
+    },
+    "url_or_ref": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Url Or Ref",
+      "type": "string"
+    },
+    "publisher": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Publisher"
+    },
+    "licence": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Licence"
+    },
+    "attribution": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Attribution"
+    },
+    "data_as_of": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Data As Of"
+    },
+    "retrieved_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Retrieved At"
+    },
+    "content_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Content Sha256"
+    },
+    "coverage_note": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Coverage Note"
+    },
+    "evaluation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SourceEvaluation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "score": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Score"
+    },
+    "tier": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SourceTier"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "type",
+    "url_or_ref"
+  ],
+  "title": "Source",
+  "type": "object"
+}

@@ -1,0 +1,12 @@
+facility_id,name,type,lon,lat
+HF-001,Example District Hospital,hospital,-30.1012,10.0734
+HF-002,Northgate Health Centre,clinic,-30.0521,10.1288
+HF-003,Lakeside Clinic,clinic,10.0412,-30.1566
+HF-004,Market Street Pharmacy,pharmacy,0,0
+HF-005,Hill Road Dispensary,clinic,-30.1803,10.0219
+HF-006,Example District Hospital,hospital,-30.1013,10.0735
+HF-007,Riverbend Clinic,clinic,-31.0420,10.0610
+HF-008,Southfield Maternity Home,clinic,-30.0877,10.0102
+HF-002,Eastgate Clinic,clinic,-30.0150,10.0951
+HF-010,Old Mill Health Post,clinic,-30.12,10.05
+HF-011,Westwood Clinic,clinic,,

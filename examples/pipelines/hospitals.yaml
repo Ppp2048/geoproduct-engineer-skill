@@ -1,0 +1,82 @@
+# Hospitals and clinics in an area, validated and exported as GeoJSON.
+#
+# Runs offline against the built-in "fixture" provider (Sample Town, a synthetic town that
+# is not a real place). Point it at a real provider and area by overriding the parameters.
+apiVersion: geoproduct/v1
+kind: Pipeline
+name: hospitals
+description: >-
+  Collect hospitals and clinics in an area, merge duplicates, match them to building
+  footprints, score confidence, validate locations and export GeoJSON with a quality report.
+params:
+  provider: fixture
+  area:
+    name: Sample Town
+    bbox: [0.0015, 0.0015, 0.0097, 0.0097]
+  output_name: hospitals
+stages:
+  - id: facilities
+    uses: collect.features
+    with:
+      provider: {param: provider}
+      area: {param: area}
+      tags: {amenity: [hospital, clinic]}
+
+  - id: tidy
+    uses: normalize.records
+    input: facilities
+    with:
+      categories:
+        amenity=hospital: health.hospital
+        amenity=clinic: health.clinic
+
+  - id: merged
+    uses: resolve.deduplicate
+    input: tidy
+    description: Two sources describing one hospital become one record; disagreements are kept.
+
+  - id: buildings
+    uses: collect.buildings
+    with:
+      provider: {param: provider}
+      area: {param: area}
+
+  - id: matched
+    uses: match.buildings
+    input: merged
+    with:
+      buildings: {stage: buildings}
+
+  - id: scored
+    uses: quality.confidence
+    input: matched
+
+  - id: validation
+    uses: validate.dataset
+    input: scored
+    with:
+      name: {param: output_name}
+      area: {param: area}
+      outlier_distance_m: 3000
+
+  - id: report
+    uses: report.quality
+    input: validation
+    description: Written before the gate, so a failing gate still leaves a report to read.
+    with:
+      name: {param: output_name}
+
+  - id: gate
+    uses: quality.gate
+    input: validation
+    with:
+      min_score: 0.5
+      fail_on_checks: [coordinates, crs, geometry, within_area]
+
+  - id: geojson
+    uses: export.geojson
+    input: scored
+    description: Runs only after the gate passes.
+    with:
+      name: {param: output_name}
+      description: Hospitals and clinics with evidence, confidence and building matches.

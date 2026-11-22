@@ -1,0 +1,118 @@
+# Commercial places matched to building footprints.
+#
+# Shops, offices and service businesses are collected separately (one feature query matches
+# one tag set), combined, deduplicated, then matched to footprints. Where the match is
+# exact or probable the footprint becomes the record's geometry, so floor area and the
+# containing district can be computed. Runs offline against the synthetic "fixture" town.
+apiVersion: geoproduct/v1
+kind: Pipeline
+name: commercial-buildings
+description: >-
+  Match commercial places to building footprints, measure the matched buildings and
+  export CSV and GeoJSON with a quality report.
+params:
+  provider: fixture
+  area:
+    name: Sample Town
+    bbox: [0.0015, 0.0015, 0.0097, 0.0097]
+  output_name: commercial-buildings
+stages:
+  - id: shops
+    uses: collect.features
+    with: {provider: {param: provider}, area: {param: area}, tags: {shop: null}}
+
+  - id: offices
+    uses: collect.features
+    with: {provider: {param: provider}, area: {param: area}, tags: {office: null}}
+
+  - id: services
+    uses: collect.features
+    with:
+      provider: {param: provider}
+      area: {param: area}
+      tags: {amenity: [bank, cafe, restaurant, pharmacy]}
+
+  - id: places
+    uses: combine.records
+    input: shops
+    with:
+      add: [{stage: offices}, {stage: services}]
+
+  - id: tidy
+    uses: normalize.records
+    input: places
+    with:
+      categories:
+        shop=supermarket: commercial.retail
+        office=company: commercial.office
+        amenity=bank: commercial.finance
+        amenity=cafe: commercial.food
+
+  - id: merged
+    uses: resolve.deduplicate
+    input: tidy
+    description: Sites sharing a website but far apart are linked as one organisation, not merged.
+
+  - id: buildings
+    uses: collect.buildings
+    with: {provider: {param: provider}, area: {param: area}}
+
+  - id: matched
+    uses: match.buildings
+    input: merged
+    with:
+      buildings: {stage: buildings}
+      assign_geometry: exact_or_probable
+
+  - id: measured
+    uses: enrich.measure
+    input: matched
+    with:
+      measures: [area]
+
+  - id: districts
+    uses: collect.features
+    with:
+      provider: {param: provider}
+      area: {param: area}
+      tags: {place: [neighbourhood, suburb, quarter]}
+
+  - id: located
+    uses: enrich.within
+    input: measured
+    with:
+      reference: {stage: districts}
+      name: district
+
+  - id: scored
+    uses: quality.confidence
+    input: located
+
+  - id: validation
+    uses: validate.dataset
+    input: scored
+    with:
+      name: {param: output_name}
+      area: {param: area}
+
+  - id: report
+    uses: report.quality
+    input: validation
+    with: {name: {param: output_name}}
+
+  - id: gate
+    uses: quality.gate
+    input: validation
+    with:
+      min_score: 0.6
+      max_error_share: 0.1
+
+  - id: csv
+    uses: export.csv
+    input: scored
+    with: {name: {param: output_name}}
+
+  - id: geojson
+    uses: export.geojson
+    input: scored
+    with: {name: {param: output_name}}

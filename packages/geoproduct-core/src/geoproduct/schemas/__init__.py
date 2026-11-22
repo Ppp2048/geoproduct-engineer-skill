@@ -1,0 +1,128 @@
+"""Versioned data contracts (``geoproduct/v1``).
+
+These models are the published interface between the agent, the MCP server, the pipeline
+engine and exported files. JSON Schemas generated from them live in ``schemas/v1/`` at the
+repository root (see :mod:`geoproduct.schemas.export`).
+"""
+
+from geoproduct.schemas._base import SCHEMA_VERSION, Contract, FileRef
+from geoproduct.schemas.datasets import DatasetManifest, LicenceNotice
+from geoproduct.schemas.errors import ErrorCode, GeoError
+from geoproduct.schemas.geometry import (
+    Area,
+    Geometry,
+    GeometryCollection,
+    LineString,
+    MultiLineString,
+    MultiPoint,
+    MultiPolygon,
+    Point,
+    Polygon,
+)
+from geoproduct.schemas.pipelines import PipelineSpec, RetryPolicy, StageSpec
+from geoproduct.schemas.records import (
+    Address,
+    AttributeValue,
+    Basis,
+    BuildingCandidate,
+    BuildingMatch,
+    BuildingRef,
+    Confidence,
+    ConfidenceLevel,
+    Conflict,
+    ConflictingValue,
+    Location,
+    LocationKind,
+    MatchStatus,
+    Merge,
+    Record,
+    RecordStatus,
+)
+from geoproduct.schemas.reports import (
+    CheckResult,
+    Finding,
+    QualityMetrics,
+    QualityReport,
+    Severity,
+)
+from geoproduct.schemas.runs import (
+    Counts,
+    Progress,
+    ProviderUse,
+    RunRecord,
+    RunStatus,
+    StageManifest,
+    StageState,
+    StageStatus,
+)
+from geoproduct.schemas.sources import (
+    CRITERION_WEIGHTS,
+    Criterion,
+    Evidence,
+    ExcerptCheck,
+    Rating,
+    Source,
+    SourceEvaluation,
+    SourceTier,
+    SourceType,
+)
+
+__all__ = [
+    "CRITERION_WEIGHTS",
+    "SCHEMA_VERSION",
+    "Address",
+    "Area",
+    "AttributeValue",
+    "Basis",
+    "BuildingCandidate",
+    "BuildingMatch",
+    "BuildingRef",
+    "CheckResult",
+    "Confidence",
+    "ConfidenceLevel",
+    "Conflict",
+    "ConflictingValue",
+    "Contract",
+    "Counts",
+    "Criterion",
+    "DatasetManifest",
+    "ErrorCode",
+    "Evidence",
+    "ExcerptCheck",
+    "FileRef",
+    "Finding",
+    "GeoError",
+    "Geometry",
+    "GeometryCollection",
+    "LicenceNotice",
+    "LineString",
+    "Location",
+    "LocationKind",
+    "MatchStatus",
+    "Merge",
+    "MultiLineString",
+    "MultiPoint",
+    "MultiPolygon",
+    "PipelineSpec",
+    "Point",
+    "Polygon",
+    "Progress",
+    "ProviderUse",
+    "QualityMetrics",
+    "QualityReport",
+    "Rating",
+    "Record",
+    "RecordStatus",
+    "RetryPolicy",
+    "RunRecord",
+    "RunStatus",
+    "Severity",
+    "Source",
+    "SourceEvaluation",
+    "SourceTier",
+    "SourceType",
+    "StageManifest",
+    "StageSpec",
+    "StageState",
+    "StageStatus",
+]

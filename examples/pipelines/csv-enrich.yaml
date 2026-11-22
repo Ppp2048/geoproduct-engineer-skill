@@ -1,0 +1,99 @@
+# A CSV of facilities, located and enriched geographically.
+#
+# Rows with coordinates keep them; the rest are geocoded from their address, or by name.
+# Rows that cannot be located confidently stay unresolved with the reason recorded:
+# nothing is guessed. Runs offline against the synthetic "fixture" town. Allow the folder
+# holding the CSV (for example with --allow examples/data) or copy it into the workspace.
+apiVersion: geoproduct/v1
+kind: Pipeline
+name: csv-enrich
+description: >-
+  Import a CSV, geocode rows without coordinates, merge duplicates, match buildings, add
+  the district and nearby bus stops, validate and export.
+params:
+  file: examples/data/sample-facilities.csv
+  provider: fixture
+  area:
+    name: Sample Town
+    bbox: [0.0015, 0.0015, 0.0097, 0.0097]
+  output_name: facilities-enriched
+stages:
+  - id: rows
+    uses: collect.file
+    max_reject_share: 0.2
+    with:
+      path: {param: file}
+      title: Sample facilities list
+      licence: CC0-1.0
+
+  - id: tidy
+    uses: normalize.records
+    input: rows
+
+  - id: located
+    uses: geocode.records
+    input: tidy
+    with:
+      provider: {param: provider}
+      bias: {param: area}
+
+  - id: merged
+    uses: resolve.deduplicate
+    input: located
+
+  - id: buildings
+    uses: collect.buildings
+    with: {provider: {param: provider}, area: {param: area}}
+
+  - id: matched
+    uses: match.buildings
+    input: merged
+    with: {buildings: {stage: buildings}}
+
+  - id: districts
+    uses: collect.features
+    with:
+      provider: {param: provider}
+      area: {param: area}
+      tags: {place: [neighbourhood, suburb, quarter]}
+
+  - id: in-district
+    uses: enrich.within
+    input: matched
+    with: {reference: {stage: districts}, name: district}
+
+  - id: stops
+    uses: collect.features
+    with: {provider: {param: provider}, area: {param: area}, tags: {highway: bus_stop}}
+
+  - id: near-stops
+    uses: enrich.nearby
+    input: in-district
+    with: {reference: {stage: stops}, name: bus_stop, radius_m: 400}
+
+  - id: scored
+    uses: quality.confidence
+    input: near-stops
+
+  - id: validation
+    uses: validate.dataset
+    input: scored
+    with:
+      name: {param: output_name}
+      area: {param: area}
+      outlier_distance_m: 3000
+
+  - id: report
+    uses: report.quality
+    input: validation
+    with: {name: {param: output_name}}
+
+  - id: csv
+    uses: export.csv
+    input: scored
+    with: {name: {param: output_name}}
+
+  - id: geojson
+    uses: export.geojson
+    input: scored
+    with: {name: {param: output_name}}

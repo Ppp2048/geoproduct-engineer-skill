@@ -1,0 +1,44 @@
+[project]
+name = "geoproduct-mcp"
+version = "0.1.0.dev0"
+description = "MCP server for evidence-backed geospatial research, pipelines and validation"
+requires-python = ">=3.12"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Ppp2048" }]
+keywords = ["mcp", "model-context-protocol", "geospatial", "gis", "geocoding", "agents"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Typing :: Typed",
+]
+dependencies = [
+    "geoproduct-core==0.1.0.dev0",
+    "mcp>=2.3,<3",
+]
+
+[project.scripts]
+geoproduct-mcp = "geoproduct_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/Ppp2048/geoproduct-engineer-skill"
+Documentation = "https://github.com/Ppp2048/geoproduct-engineer-skill/tree/main/docs"
+Issues = "https://github.com/Ppp2048/geoproduct-engineer-skill/issues"
+Changelog = "https://github.com/Ppp2048/geoproduct-engineer-skill/blob/main/CHANGELOG.md"
+
+[build-system]
+requires = ["uv_build>=0.11.23,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "geoproduct_mcp"
+
+[tool.uv.sources]
+geoproduct-core = { workspace = true }

@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Ppp2048/geoproduct-engineer-skill/main/schemas/v1/quality-report.schema.json",
+  "$defs": {
+    "CheckResult": {
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "Check",
+          "type": "string"
+        },
+        "errors": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Errors",
+          "type": "integer"
+        },
+        "warnings": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Warnings",
+          "type": "integer"
+        },
+        "infos": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Infos",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "check"
+      ],
+      "title": "CheckResult",
+      "type": "object"
+    },
+    "Finding": {
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "Check",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "message": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "record_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Id"
+        },
+        "details": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Details",
+          "type": "object"
+        }
+      },
+      "required": [
+        "check",
+        "severity",
+        "message"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "LicenceNotice": {
+      "additionalProperties": false,
+      "description": "A licence that applies to part of a dataset, and the sources it comes from.",
+      "properties": {
+        "licence": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Licence",
+          "type": "string"
+        },
+        "source_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Source Ids",
+          "type": "array"
+        },
+        "attribution": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attribution"
+        },
+        "share_alike": {
+          "default": false,
+          "title": "Share Alike",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "licence",
+        "source_ids"
+      ],
+      "title": "LicenceNotice",
+      "type": "object"
+    },
+    "QualityMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "record_count": {
+          "minimum": 0,
+          "title": "Record Count",
+          "type": "integer"
+        },
+        "with_geometry": {
+          "minimum": 0,
+          "title": "With Geometry",
+          "type": "integer"
+        },
+        "missing_geometry": {
+          "minimum": 0,
+          "title": "Missing Geometry",
+          "type": "integer"
+        },
+        "records_with_errors": {
+          "minimum": 0,
+          "title": "Records With Errors",
+          "type": "integer"
+        },
+        "records_with_warnings_only": {
+          "minimum": 0,
+          "title": "Records With Warnings Only",
+          "type": "integer"
+        },
+        "error_share": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Error Share",
+          "type": "number"
+        },
+        "unresolved_share": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Unresolved Share",
+          "type": "number"
+        },
+        "conflicting_share": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Conflicting Share",
+          "type": "number"
+        },
+        "evidence_coverage": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Coverage"
+        },
+        "statuses": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "propertyNames": {
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "title": "Statuses",
+          "type": "object"
+        },
+        "confidence_levels": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "propertyNames": {
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "title": "Confidence Levels",
+          "type": "object"
+        },
+        "location_kinds": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "propertyNames": {
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "title": "Location Kinds",
+          "type": "object"
+        },
+        "match_statuses": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "propertyNames": {
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "title": "Match Statuses",
+          "type": "object"
+        }
+      },
+      "required": [
+        "record_count",
+        "with_geometry",
+        "missing_geometry",
+        "records_with_errors",
+        "records_with_warnings_only",
+        "error_share",
+        "unresolved_share",
+        "conflicting_share"
+      ],
+      "title": "QualityMetrics",
+      "type": "object"
+    },
+    "Severity": {
+      "enum": [
+        "error",
+        "warning",
+        "info"
+      ],
+      "title": "Severity",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "geoproduct/v1",
+      "default": "geoproduct/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Dataset",
+      "type": "string"
+    },
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/CheckResult"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "score": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Score",
+      "type": "number"
+    },
+    "metrics": {
+      "$ref": "#/$defs/QualityMetrics"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/Finding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "findings_truncated": {
+      "default": false,
+      "title": "Findings Truncated",
+      "type": "boolean"
+    },
+    "licences": {
+      "items": {
+        "$ref": "#/$defs/LicenceNotice"
+      },
+      "title": "Licences",
+      "type": "array"
+    },
+    "notes": {
+      "items": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    }
+  },
+  "required": [
+    "dataset",
+    "checks",
+    "score",
+    "metrics"
+  ],
+  "title": "QualityReport",
+  "type": "object"
+}

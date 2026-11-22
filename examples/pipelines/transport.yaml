@@ -1,0 +1,111 @@
+# Public transport stops checked against the street network.
+#
+# Each rule states a spatial relationship the stops should have; validation reports every
+# stop that breaks one, and the gate stops the run when too many do. Runs offline against
+# the synthetic "fixture" town, where one stop is deliberately 100 m from any street and
+# the station lies just outside the mapped districts.
+apiVersion: geoproduct/v1
+kind: Pipeline
+name: transport-stops
+description: >-
+  Validate that stops are on a street, outside parks and inside a district; add the
+  distance to the nearest street and export the result.
+params:
+  provider: fixture
+  area:
+    name: Sample Town
+    bbox: [0.0015, 0.0015, 0.0105, 0.0097]
+  max_stop_distance_m: 30
+  output_name: transport-stops
+stages:
+  - id: stops
+    uses: collect.features
+    with: {provider: {param: provider}, area: {param: area}, tags: {highway: bus_stop}}
+
+  - id: stations
+    uses: collect.features
+    with:
+      provider: {param: provider}
+      area: {param: area}
+      tags: {railway: [station, halt]}
+
+  - id: network
+    uses: combine.records
+    input: stops
+    with: {add: [{stage: stations}]}
+
+  - id: streets
+    uses: collect.features
+    with:
+      provider: {param: provider}
+      area: {param: area}
+      tags: {highway: [primary, secondary, tertiary, residential]}
+
+  - id: parks
+    uses: collect.features
+    with: {provider: {param: provider}, area: {param: area}, tags: {leisure: park}}
+
+  - id: districts
+    uses: collect.features
+    with:
+      provider: {param: provider}
+      area: {param: area}
+      tags: {place: [neighbourhood, suburb, quarter]}
+
+  - id: access
+    uses: enrich.nearby
+    input: network
+    with:
+      reference: {stage: streets}
+      name: street
+      radius_m: 200
+      max_ids: 3
+
+  - id: located
+    uses: enrich.within
+    input: access
+    with:
+      reference: {stage: districts}
+      name: district
+
+  - id: scored
+    uses: quality.confidence
+    input: located
+
+  - id: validation
+    uses: validate.dataset
+    input: scored
+    with:
+      name: {param: output_name}
+      area: {param: area}
+      rules:
+        - name: stop-on-street
+          kind: near
+          reference: {stage: streets}
+          max_distance_m: {param: max_stop_distance_m}
+          categories: [highway=bus_stop]
+        - name: not-in-park
+          kind: not_within
+          reference: {stage: parks}
+        - name: in-a-district
+          kind: within
+          reference: {stage: districts}
+          severity: warning
+
+  - id: report
+    uses: report.quality
+    input: validation
+    with: {name: {param: output_name}}
+
+  - id: gate
+    uses: quality.gate
+    input: validation
+    description: Stops the run when more than a quarter of the records have errors.
+    with:
+      max_error_share: 0.25
+      fail_on_checks: [coordinates, crs, geometry]
+
+  - id: csv
+    uses: export.csv
+    input: scored
+    with: {name: {param: output_name}}

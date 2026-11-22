@@ -1,0 +1,53 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report security problems privately (see SECURITY.md), not here.
+        Do not paste secrets, private data or full workspace files.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce it
+      description: The command, tool call or pipeline spec, ideally against the offline `fixture` provider.
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error or output
+      description: The error code and message, or the relevant part of the result.
+      render: text
+  - type: dropdown
+    id: part
+    attributes:
+      label: Part
+      options:
+        - MCP server (geoproduct-mcp)
+        - CLI or Python library (geoproduct-core)
+        - Agent Skill
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: 0.1.0, or a commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Python version, MCP client and transport (stdio or HTTP), provider.
+      placeholder: Ubuntu 24.04, Python 3.13, Claude Desktop over stdio, overpass

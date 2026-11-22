@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 264" width="1200" height="264" role="img" aria-labelledby="title desc">
+  <title id="title">The five building match statuses</title>
+  <desc id="desc">exact: a footprint contains the point and a name, address or identifier agrees. probable: a footprint contains the point but nothing confirms the link, or a single nearby footprint has supporting evidence. ambiguous: several footprints score alike, so none is chosen. approximate_point: a single footprint nearby, without supporting evidence, so the point is kept as it is. none: no candidate footprint within reach of the point.</desc>
+  <defs>
+    <!-- One mini map: dim neighbouring footprints, reused in every panel -->
+    <g id="neighbours" fill="#18284a" stroke="#2e4677" stroke-width="1.2">
+      <rect x="10" y="10" width="38" height="30"/>
+      <rect x="150" y="12" width="32" height="40"/>
+      <rect x="152" y="112" width="30" height="38"/>
+      <rect x="10" y="118" width="34" height="32"/>
+    </g>
+    <style>
+      .label { font: 700 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #f0f6fc; }
+      .text { font: 16px -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #9fb3d1; }
+      .pin { stroke: #f0f6fc; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <!-- exact -->
+  <g transform="translate(0 0)">
+    <rect x="0.5" y="0.5" width="223" height="263" rx="14" fill="#0e1830" stroke="#25395f"/>
+    <g transform="translate(16 16)">
+      <rect width="192" height="160" rx="8" fill="#0a1222"/>
+      <use href="#neighbours"/>
+      <rect x="58" y="46" width="76" height="68" fill="#3fb950" fill-opacity="0.2" stroke="#3fb950" stroke-width="2"/>
+      <circle cx="96" cy="80" r="6" class="pin" fill="#3fb950"/>
+      <path d="M118 58 l5 5 l9 -10" fill="none" stroke="#3fb950" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <circle cx="23" cy="207" r="6" fill="#3fb950"/>
+    <text x="37" y="213" class="label">exact</text>
+    <text x="16" y="242" class="text">inside, and confirmed</text>
+  </g>
+
+  <!-- probable -->
+  <g transform="translate(244 0)">
+    <rect x="0.5" y="0.5" width="223" height="263" rx="14" fill="#0e1830" stroke="#25395f"/>
+    <g transform="translate(16 16)">
+      <rect width="192" height="160" rx="8" fill="#0a1222"/>
+      <use href="#neighbours"/>
+      <rect x="58" y="46" width="76" height="68" fill="#d29922" fill-opacity="0.12" stroke="#d29922" stroke-width="2" stroke-dasharray="6 4"/>
+      <circle cx="96" cy="80" r="6" class="pin" fill="#d29922"/>
+      <text x="118" y="68" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#d29922">?</text>
+    </g>
+    <circle cx="23" cy="207" r="6" fill="#d29922"/>
+    <text x="37" y="213" class="label">probable</text>
+    <text x="16" y="242" class="text">likely, not confirmed</text>
+  </g>
+
+  <!-- ambiguous -->
+  <g transform="translate(488 0)">
+    <rect x="0.5" y="0.5" width="223" height="263" rx="14" fill="#0e1830" stroke="#25395f"/>
+    <g transform="translate(16 16)">
+      <rect width="192" height="160" rx="8" fill="#0a1222"/>
+      <use href="#neighbours"/>
+      <rect x="36" y="46" width="52" height="68" fill="#a371f7" fill-opacity="0.12" stroke="#a371f7" stroke-width="2" stroke-dasharray="6 4"/>
+      <rect x="104" y="46" width="52" height="68" fill="#a371f7" fill-opacity="0.12" stroke="#a371f7" stroke-width="2" stroke-dasharray="6 4"/>
+      <circle cx="96" cy="80" r="6" class="pin" fill="#a371f7"/>
+    </g>
+    <circle cx="23" cy="207" r="6" fill="#a371f7"/>
+    <text x="37" y="213" class="label">ambiguous</text>
+    <text x="16" y="242" class="text">too close to call</text>
+  </g>
+
+  <!-- approximate_point -->
+  <g transform="translate(732 0)">
+    <rect x="0.5" y="0.5" width="223" height="263" rx="14" fill="#0e1830" stroke="#25395f"/>
+    <g transform="translate(16 16)">
+      <rect width="192" height="160" rx="8" fill="#0a1222"/>
+      <use href="#neighbours"/>
+      <rect x="74" y="34" width="70" height="56" fill="#18284a" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="2 4"/>
+      <circle cx="70" cy="114" r="20" fill="#58a6ff" fill-opacity="0.12" stroke="#58a6ff" stroke-width="1.2" stroke-dasharray="3 3"/>
+      <circle cx="70" cy="114" r="6" class="pin" fill="#58a6ff"/>
+    </g>
+    <circle cx="23" cy="207" r="6" fill="#58a6ff"/>
+    <text x="37" y="213" class="label">approximate_point</text>
+    <text x="16" y="242" class="text">near, not inside</text>
+  </g>
+
+  <!-- none -->
+  <g transform="translate(976 0)">
+    <rect x="0.5" y="0.5" width="223" height="263" rx="14" fill="#0e1830" stroke="#25395f"/>
+    <g transform="translate(16 16)">
+      <rect width="192" height="160" rx="8" fill="#0a1222"/>
+      <use href="#neighbours"/>
+      <circle cx="96" cy="80" r="40" fill="none" stroke="#8b949e" stroke-width="1.2" stroke-dasharray="3 4"/>
+      <circle cx="96" cy="80" r="6" class="pin" fill="#8b949e"/>
+    </g>
+    <circle cx="23" cy="207" r="6" fill="#8b949e"/>
+    <text x="37" y="213" class="label">none</text>
+    <text x="16" y="242" class="text">nothing within reach</text>
+  </g>
+</svg>

@@ -1,4 +1,5 @@
-"""Release metadata that must stay consistent: versions, licences, the changelog and CI pins.
+"""Release metadata that must stay consistent: versions, licences, the changelog, the README's
+counts and examples, and CI pins.
 
 These are the release-checklist items a test can check. The rest is in docs/releasing.md.
 """
@@ -74,7 +75,9 @@ def test_relative_links_in_the_documentation_resolve() -> None:
     broken = []
     for doc in DOCS:
         text = re.sub(r"```.*?```", "", doc.read_text(encoding="utf-8"), flags=re.S)
-        for target in re.findall(r"\]\(([^)\s]+)\)", text):
+        # Markdown links and images, and the HTML src and href attributes the README uses.
+        targets = re.findall(r"\]\(([^)\s]+)\)", text) + re.findall(r'(?:src|href)="([^"]+)"', text)
+        for target in targets:
             if re.match(r"[a-z]+:", target) or target.startswith("#"):
                 continue
             path = (doc.parent / target.split("#")[0]).resolve()
@@ -94,6 +97,36 @@ def test_the_readme_pipeline_example_compiles() -> None:
     assert [stage.id for stage in plan.stages] == ["clinics", "buildings", "matched", "export"]
 
 
+def test_the_readme_counts_and_names_match_the_code(tmp_path: Path) -> None:
+    import anyio
+    from mcp import Client
+
+    from geoproduct.stages import builtin_registry
+    from geoproduct.workspace import Workspace
+    from geoproduct_mcp.server import create_server
+    from geoproduct_mcp.tools.common import ServerState
+
+    names: dict[str, list[str]] = {}
+
+    async def listing() -> None:
+        state = ServerState(Workspace(tmp_path, []), env={})
+        async with Client(create_server(state)) as client:
+            names["tools"] = [tool.name for tool in (await client.list_tools()).tools]
+            names["prompts"] = [prompt.name for prompt in (await client.list_prompts()).prompts]
+
+    anyio.run(listing)
+    names["stages"] = list(builtin_registry().names())
+    workflows = ROOT / "skills" / "geoproduct-engineer" / "workflows"
+    names["workflows"] = [path.stem for path in workflows.glob("*.md")]
+
+    # Badges encode spaces in their URLs.
+    readme = (ROOT / "README.md").read_text(encoding="utf-8").replace("%20", " ")
+    for kind, found in names.items():
+        assert f"{len(found)} {kind}" in readme, f"the README does not say '{len(found)} {kind}'"
+    for name in names["tools"] + names["prompts"] + names["stages"]:
+        assert f"`{name}`" in readme, f"the README does not list `{name}`"
+
+
 # Words that must not appear anywhere in the repository: the name of a private project this
 # toolkit is independent of, and specific places it must not assume. They are stored as
 # SHA-256 digests, so this test does not publish them itself.
@@ -107,6 +140,7 @@ BANNED_DIGESTS = frozenset(
     }
 )
 TEXT_SUFFIXES = {".md", ".py", ".yaml", ".yml", ".json", ".csv", ".toml", ".txt", ".example"}
+TEXT_SUFFIXES |= {".svg"}
 # Local, generated or private files that are never committed.
 SKIPPED_PARTS = {".git", ".venv", ".geoproduct", "dist", "__pycache__", ".mypy_cache"}
 SKIPPED_PARTS |= {".ruff_cache", ".pytest_cache", "prd.txt"}

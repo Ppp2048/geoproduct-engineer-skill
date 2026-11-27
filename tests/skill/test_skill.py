@@ -138,6 +138,45 @@ def test_references_stay_one_level_deep() -> None:
             ), f"{target} in {path.name}"
 
 
+# Refusals and the evaluation workflow (audit GP-19) -----------------------------------------
+
+EVALUATIONS = SKILL.parents[1] / "docs" / "evaluations.md"
+
+
+def test_skill_md_says_not_to_work_around_a_refusal() -> None:
+    _, body = frontmatter()
+    text = " ".join(body.split())
+    assert "don't retry it with another tool, a shell command or a script" in text
+    assert "return reports and findings as text" in text
+
+
+def test_the_evaluation_run_prompt_states_the_reporting_rule() -> None:
+    text = EVALUATIONS.read_text(encoding="utf-8")
+    templates = re.findall(r"```text\n(Execute this evaluation task\..*?)```", text, re.S)
+    assert len(templates) == 1, "docs/evaluations.md holds one run prompt template"
+    prompt = " ".join(templates[0].split())
+    for phrase in (
+        "Return every report, audit, plan or note the task asks for as text",
+        'a line "=== FILE: <file name> ==="',
+        'a line "=== END FILE ==="',
+        "Do not write these files yourself: the orchestrator saves them",
+        "do not retry it with another tool, a shell command or a script",
+        "Report the refusal in your final response",
+    ):
+        assert phrase in prompt, phrase
+
+
+def test_the_evaluation_provenance_records_who_produced_and_saved_each_file() -> None:
+    text = EVALUATIONS.read_text(encoding="utf-8")
+    [example] = re.findall(r"```json\n(.*?)```", text, re.S)
+    provenance = json.loads(example)
+    assert {"run_prompt", "files", "refusals", "workarounds", "graded_by"} <= provenance.keys()
+    assert provenance["files"]
+    for entry in provenance["files"]:
+        assert {"path", "produced_by", "delivered_as", "saved_by"} <= entry.keys()
+    assert any(entry["saved_by"].startswith("orchestrator") for entry in provenance["files"])
+
+
 # Agreement with the code -------------------------------------------------------------------
 
 

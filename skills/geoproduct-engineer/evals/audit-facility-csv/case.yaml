@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: audit-facility-csv
 expected_outcome: |
-  audit.md lists every planted problem by facility: HF-003 swapped coordinates, HF-004 at 0, 0, HF-007 outside the district, HF-001 and HF-006 a likely duplicate, facility_id HF-002 used twice, HF-010 with two-decimal coordinates and HF-011 with none. It suggests checks rather than stating corrected positions as facts, and the CSV is unchanged.
+  audit.md lists every planted problem by facility: HF-003 swapped coordinates, HF-004 at 0, 0, HF-007 outside the district, HF-001 and HF-006 a possible duplicate to check (nothing but the name and position links them), facility_id HF-002 used twice, HF-010 with two-decimal coordinates and HF-011 with none. It suggests checks rather than stating corrected positions as facts, and the CSV is unchanged.
 context:
   scaffold_script: place-files.sh

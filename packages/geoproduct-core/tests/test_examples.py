@@ -75,13 +75,21 @@ def test_hospitals(cli: Cli) -> None:
     by_name = {f["properties"]["name"]: f["properties"] for f in data["features"]}
     assert set(by_name) == {
         "Sample General Hospital",
+        "Sample General Hosp.",
         "Northside Hospital",
         "Riverside Clinic",
         "Hilltop Clinic",
     }
-    hospital = by_name["Sample General Hospital"]
-    assert hospital["building_match"]["status"] == "exact"
-    assert hospital["conflicts"][0]["field"] == "attributes.beds"
+    # The two Sample General Hospital records share only a website, which does not identify
+    # a site, and nothing else shows they are one: they stay apart, linked as one
+    # organisation and marked as possible duplicates.
+    first, second = by_name["Sample General Hospital"], by_name["Sample General Hosp."]
+    assert first["organisation_id"]
+    assert first["organisation_id"] == second["organisation_id"]
+    assert not first["merged"]
+    assert not first["conflicts"]
+    assert any(x.startswith("Possible duplicate of fixture:poi-02 (") for x in first["limitations"])
+    assert first["building_match"]["status"] == "exact"
     assert by_name["Riverside Clinic"]["building_match"]["status"] == "ambiguous"
     assert by_name["Hilltop Clinic"]["building_match"]["status"] == "none"
     assert data["sources"]

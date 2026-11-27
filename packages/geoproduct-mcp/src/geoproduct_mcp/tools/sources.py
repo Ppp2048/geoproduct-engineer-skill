@@ -27,7 +27,7 @@ from geoproduct.schemas import (
 )
 from geoproduct.schemas._base import ShortText, Text
 from geoproduct.workspace import Workspace
-from geoproduct_mcp.tools.common import Done, Job, ServerState, invalid
+from geoproduct_mcp.tools.common import Done, Job, ServerState, invalid, stop_if_cancelled
 
 DEFAULT_AGENT: Final = (
     f"geoproduct-core/{__version__} (+https://github.com/Ppp2048/geoproduct-engineer-skill)"
@@ -122,6 +122,7 @@ def fetch_source_data(state: ServerState, job: Job, *, source_id: str) -> Done:
         fetched = Fetcher(agent, transport=state.fetch_transport).fetch(target)
     else:
         fetched = _read_file(state, target)
+    stop_if_cancelled(job)
     folder = state.sources.folder(source_id)
     content = folder / f"content{EXTENSIONS[fetched.kind]}"
     Workspace.write_bytes_atomic(content, fetched.body)

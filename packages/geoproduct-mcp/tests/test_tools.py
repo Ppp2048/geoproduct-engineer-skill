@@ -12,7 +12,7 @@ from geoproduct.errors import GeoProductError
 from geoproduct.providers.fixture import AREA_BBOX
 from geoproduct.schemas import Area, ErrorCode, Evidence, ExcerptCheck, SourceEvaluation, SourceType
 from geoproduct_mcp.tools import geography, quality, records, sources
-from geoproduct_mcp.tools.common import Done, Job, ServerState
+from geoproduct_mcp.tools.common import Done, Job, ServerState, run_stage
 
 AREA = Area(bbox=AREA_BBOX)
 PAGE = "<html><body><p>Example Clinic opened its west wing in 2019 with 12 beds.</p></body></html>"
@@ -87,6 +87,23 @@ def test_fetching_keeps_a_hashed_copy_and_its_text(state: ServerState, job: Job)
     for path in result["stored"]:
         assert (state.workspace.root / path).is_file()
     assert result["loadable"] is False
+
+
+def test_a_fetch_cancelled_while_downloading_keeps_nothing(state: ServerState, job: Job) -> None:
+    """Audit GP-07: the worker of a cancelled call is abandoned, not stopped. The cancel
+    arrives while the page downloads; the page must not be stored."""
+
+    def cancelled_meanwhile(request: httpx2.Request) -> httpx2.Response:
+        job.cancel.set()
+        return fetch_answers(request)
+
+    state.fetch_transport = httpx2.MockTransport(cancelled_meanwhile)
+    source_id = register(state, "https://example.org/clinic")
+    with pytest.raises(GeoProductError) as caught:
+        sources.fetch_source_data(state, job, source_id=source_id)
+    assert caught.value.code == ErrorCode.cancelled
+    assert not list(state.sources.folder(source_id).glob("content.*"))
+    assert state.sources.get(source_id).retrieved_at is None
 
 
 def test_excerpts_are_checked_against_fetched_text(state: ServerState, job: Job) -> None:
@@ -188,6 +205,32 @@ def test_datasets_are_combined_with_their_sources(state: ServerState, job: Job) 
     assert {s.id for s in mapped_data.sources} <= {s.id for s in data.sources}
     with pytest.raises(GeoProductError):
         records.create_dataset(state, job, dataset_ids=[mapped["dataset"]["dataset_id"]] * 2)
+
+
+def test_a_stage_cancelled_as_it_finishes_stores_nothing(state: ServerState, job: Job) -> None:
+    """Audit GP-07: the cancel arrives after the stage's last check, while its output is
+    being prepared. No dataset is committed, and the reserved folder is removed."""
+    rows = [{"id": "a", "name": "Example Clinic"}]
+    dataset_id = out(records.create_dataset(state, job, records=rows))["dataset"]["dataset_id"]
+    folders = state.workspace.root / "datasets"
+    before = sorted(p.name for p in folders.iterdir())
+
+    def cancelled_meanwhile(data: Any) -> Any:
+        job.cancel.set()
+        return data
+
+    with pytest.raises(GeoProductError) as caught:
+        run_stage(
+            state,
+            job,
+            "normalize.records",
+            params={},
+            input_id=dataset_id,
+            created_by="normalize_records",
+            adjust=cancelled_meanwhile,
+        )
+    assert caught.value.code == ErrorCode.cancelled
+    assert sorted(p.name for p in folders.iterdir()) == before
 
 
 def test_invalid_records_are_rejected_with_reasons(state: ServerState, job: Job) -> None:
@@ -293,6 +336,36 @@ def test_invalid_stage_options_list_the_problems(state: ServerState, job: Job) -
         )
 
 
+def test_wikidata_items_are_classified_through_the_tool(state: ServerState, job: Job) -> None:
+    """Three branches 60 m apart share one Wikidata item. Unclassified, it merges nothing;
+    named as one establishment, it merges them. A Wikidata key is never a site key."""
+    rows = [
+        {
+            "id": rid,
+            "name": "Corner Market",
+            "geometry": {"type": "Point", "coordinates": [0.003 + k * 0.00054, 0.003]},
+            "external_ids": {"wikidata": "Q1000001"},
+        }
+        for k, rid in enumerate("abc")
+    ]
+    dataset_id = out(records.create_dataset(state, job, records=rows))["dataset"]["dataset_id"]
+    unknown = records.deduplicate_entities(state, job, dataset_id=dataset_id)
+    assert out(unknown)["dataset"]["item_count"] == 3
+    assert any("wikidata_sites" in note for note in out(unknown)["dataset"]["notes"])
+    chain = records.deduplicate_entities(
+        state, job, dataset_id=dataset_id, wikidata_organisations=["Q1000001"], name="chain"
+    )
+    assert out(chain)["dataset"]["item_count"] == 3
+    one_site = records.deduplicate_entities(
+        state, job, dataset_id=dataset_id, wikidata_sites=["q1000001"], name="one-site"
+    )
+    assert out(one_site)["dataset"]["item_count"] == 1
+    for bad in ({"site_keys": ["wikidata"]}, {"wikidata_sites": ["not an item"]}):
+        with pytest.raises(GeoProductError) as caught:
+            records.deduplicate_entities(state, job, dataset_id=dataset_id, **bad)
+        assert caught.value.code == ErrorCode.invalid_input
+
+
 # A whole research flow ---------------------------------------------------------------------
 
 
@@ -317,7 +390,16 @@ def test_collect_resolve_match_validate_report_and_export(
         "dataset_id"
     ]
     deduped = out(records.deduplicate_entities(state, job, dataset_id=ids["normal"]))
-    assert deduped["dataset"]["item_count"] < hospitals["dataset"]["item_count"]
+    # The two Sample General Hospital records share only a website, which does not identify
+    # a site, so they stay apart.
+    assert deduped["dataset"]["item_count"] == hospitals["dataset"]["item_count"]
+    # A caller who knows the website is per-site can say so, and then the two merge.
+    per_site = out(
+        records.deduplicate_entities(
+            state, job, dataset_id=ids["normal"], site_keys=["website"], name="per-site"
+        )
+    )
+    assert per_site["dataset"]["item_count"] == hospitals["dataset"]["item_count"] - 1
     buildings = out(geography.get_building_footprints(state, job, area=AREA, provider="fixture"))
     matched = out(
         records.match_building_footprints(

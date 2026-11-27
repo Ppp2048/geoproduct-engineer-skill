@@ -4,10 +4,11 @@ Records and buildings are written as GeoJSON so any GIS tool can open an interme
 result; their sources and evidence go next to them in ``provenance.json``.
 """
 
+import codecs
 import json
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from pydantic import Field
 
@@ -168,13 +169,81 @@ def load(kind: DataKind, folder: Path) -> StageData:
             case DataKind.files:
                 return FileSet.model_validate(_read(folder / "files.json"))
     except (OSError, ValueError, KeyError) as exc:
-        raise GeoProductError(
-            ErrorCode.internal,
-            f"A stored stage output could not be read ({type(exc).__name__}).",
-            details={"folder": folder.name},
-            hint="Resume the run; the stage will be run again.",
-        ) from exc
+        raise _unreadable(folder, exc) from exc
     raise TypeError(f"unknown data kind: {kind}")
+
+
+def head(kind: DataKind, folder: Path, limit: int) -> StageData:
+    """The first ``limit`` records or buildings of a stored output, without its sources and
+    evidence. The GeoJSON is read as a stream, only as far as those items go, so a preview
+    of a large output does not load all of it (audit GP-09). A report or a file list is
+    small and is loaded whole, and so is a GeoJSON file laid out otherwise than
+    :func:`save` writes it."""
+    try:
+        match kind:
+            case DataKind.records:
+                features = _head_features(folder / "records.geojson", limit)
+                if features is not None:
+                    return RecordSet(records=[Record.from_feature(f) for f in features])
+            case DataKind.buildings:
+                features = _head_features(folder / "buildings.geojson", limit)
+                if features is not None:
+                    buildings = [{**f["properties"], "geometry": f["geometry"]} for f in features]
+                    return BuildingSet.model_validate({"buildings": buildings})
+    except (OSError, ValueError, KeyError) as exc:
+        raise _unreadable(folder, exc) from exc
+    return load(kind, folder)
+
+
+COLLECTION_START: Final = '{"type":"FeatureCollection","features":['
+"""How every GeoJSON file :func:`save` writes begins (compact, ``type`` first)."""
+READ_CHUNK: Final = 64 * 1024
+
+
+def _head_features(path: Path, limit: int) -> list[dict[str, Any]] | None:
+    """The first ``limit`` features of a collection written by :func:`save`, or None when
+    the file does not begin as :func:`save` writes it."""
+    features: list[dict[str, Any]] = []
+    decoder = json.JSONDecoder()
+    utf8 = codecs.getincrementaldecoder("utf-8")()
+    text, pos, started = "", 0, False
+    with Workspace.open_binary(path) as handle:
+        while len(features) < limit:
+            chunk = handle.read(READ_CHUNK)
+            text += utf8.decode(chunk, final=not chunk)
+            if not started:
+                if len(text) < len(COLLECTION_START) and chunk:
+                    continue
+                if not text.startswith(COLLECTION_START):
+                    return None
+                started, pos = True, len(COLLECTION_START)
+            while len(features) < limit:
+                while pos < len(text) and text[pos] in ", \t\r\n":
+                    pos += 1
+                if pos < len(text) and text[pos] == "]":
+                    return features
+                try:
+                    feature, pos = decoder.raw_decode(text, pos)
+                except json.JSONDecodeError:
+                    if not chunk:
+                        raise
+                    break  # the feature continues in the next chunk
+                if not isinstance(feature, dict):
+                    raise ValueError("a feature is not an object")
+                features.append(feature)
+            if not chunk:
+                break
+            text, pos = text[pos:], 0  # keep only what is not decoded yet
+    return features
+
+
+def _unreadable(folder: Path, exc: Exception) -> GeoProductError:
+    return GeoProductError(
+        ErrorCode.internal,
+        f"A stored stage output could not be read ({type(exc).__name__}).",
+        details={"folder": folder.name},
+        hint="Resume the run; the stage will be run again.",
+    )
 
 
 def _collection(features: list[dict[str, Any]]) -> dict[str, Any]:

@@ -9,11 +9,16 @@ fixture town, whose ground truth is known.
 
 Planted problems, each with the outcome the toolkit must give:
 
-- REG-1 repeats a mapped hospital whose two map records disagree on beds: one merged
-  record, status ``conflicting``, every value kept with its evidence.
+- The map has two hospital records with nearly the same name, 11 m apart, that share a
+  website but disagree on beds. A website is organisation-level: it does not identify a
+  site, and nothing else shows they are one, so the two are kept apart, linked as one
+  organisation, and marked as possible duplicates for review. Each keeps its own bed
+  count with its evidence.
+- REG-1 and REG-4 repeat a mapped hospital and clinic by name and position only, with no
+  shared identifier or address to confirm it: each is kept apart from its map record and
+  both are marked as possible duplicates for review.
 - REG-2 has an address but no coordinates: geocoded, citing the geocoder.
 - REG-3 has latitude 95: rejected on load, with the reason.
-- REG-4 repeats a mapped clinic: merged.
 - The researched record has an address the geocoder cannot find: kept, unresolved, with
   its limitations, never given a made-up position.
 """
@@ -272,41 +277,71 @@ def records_of(collection: dict[str, Any]) -> dict[str, Record]:
     return {f["id"]: Record.from_feature(f) for f in collection["features"]}
 
 
-def by_name(records: dict[str, Record]) -> dict[str | None, Record]:
-    return {r.name: r for r in records.values()}
+def by_name(records: dict[str, Record]) -> dict[str | None, list[Record]]:
+    """Records grouped by name; a name kept on two records lists both."""
+    named: dict[str | None, list[Record]] = {}
+    for record in records.values():
+        named.setdefault(record.name, []).append(record)
+    return named
+
+
+def match_status(record: Record) -> str | None:
+    return record.building_match.status.value if record.building_match else None
 
 
 def test_the_workflow_reaches_the_ground_truth(run: dict[str, Any]) -> None:
     assert (run["register"]["item_count"], run["register"]["rejected"]) == (3, 1)
     assert "1 not found" not in str(run["researched"]), "the excerpt is on the fetched page"
     assert run["combined"]["item_count"] == 3 + 1 + 5
-    assert run["merged"]["item_count"] == 6
+    assert run["merged"]["item_count"] == 9, "no two records share a site identifier or address"
 
     collection = json.loads((run["exports"] / "sample-town-health.geojson").read_text("utf-8"))
-    records = by_name(records_of(collection))
-    assert set(records) == {
-        "Sample General Hospital",
-        "Northside Hospital",
-        "Riverside Clinic",
-        "Hilltop Clinic",
-        "Eastgate Clinic",
-        "Southgate Health Centre",
+    records = records_of(collection)
+    named = by_name(records)
+    assert {name: len(found) for name, found in named.items()} == {
+        "Sample General Hospital": 2,
+        "Sample General Hosp.": 1,
+        "Northside Hospital": 1,
+        "Riverside Clinic": 2,
+        "Hilltop Clinic": 1,
+        "Eastgate Clinic": 1,
+        "Southgate Health Centre": 1,
     }
 
-    general = records["Sample General Hospital"]
-    assert general.status.value == "conflicting"
-    beds = next(c for c in general.conflicts if c.field == "attributes.beds")
-    assert len(beds.values) >= 2, "every disagreeing value is kept"
-    assert general.attributes["beds"].value is None, "the disputed value is cleared"
-    assert len(general.merged) == 2
+    # The map's two records of the hospital share only a website: one organisation, two
+    # records, each marked as a possible duplicate of the other, each with its own beds.
+    [general] = [r for r in named["Sample General Hospital"] if r.id != "REG-1"]
+    [abbreviated] = named["Sample General Hosp."]
+    assert general.organisation_id is not None
+    assert general.organisation_id == abbreviated.organisation_id
+    for record, other in ((general, abbreviated), (abbreviated, general)):
+        assert not record.merged
+        assert not record.conflicts
+        assert any(
+            x.startswith(f"Possible duplicate of {other.id} (same website; ")
+            and x.endswith("which do not identify a site).")
+            for x in record.limitations
+        ), record.id
+    assert {general.attributes["beds"].value, abbreviated.attributes["beds"].value} == {110, 120}
 
-    eastgate = records["Eastgate Clinic"]
+    # The register repeats a mapped hospital and clinic by name and position alone. Nothing
+    # confirms it, so each pair is kept apart and marked for review on both records.
+    [clinic] = [r for r in named["Riverside Clinic"] if r.id != "REG-4"]
+    for listed, mapped in ((records["REG-1"], general), (records["REG-4"], clinic)):
+        assert not listed.merged, listed.id
+        for record, other in ((listed, mapped), (mapped, listed)):
+            assert any(
+                x.startswith(f"Possible duplicate of {other.id} (") and "not merged" in x
+                for x in record.limitations
+            ), record.id
+
+    [eastgate] = named["Eastgate Clinic"]
     assert eastgate.geometry is not None
     assert eastgate.geometry.model_dump()["coordinates"] == [0.009, 0.0021]
     assert eastgate.location.method == "geocode:nominatim"
     assert eastgate.location.kind.value == "address_point"
 
-    southgate = records["Southgate Health Centre"]
+    southgate = records["southgate"]
     assert southgate.geometry is None, "no position is made up"
     assert southgate.status.value == "unresolved"
     assert any("no confident result" in x for x in southgate.limitations)
@@ -314,13 +349,14 @@ def test_the_workflow_reaches_the_ground_truth(run: dict[str, Any]) -> None:
     assert southgate.confidence is not None
     assert southgate.confidence.level.value == "unresolved"
 
-    statuses = {n: r.building_match.status.value for n, r in records.items() if r.building_match}
-    assert statuses["Sample General Hospital"] == "exact"
-    assert statuses["Northside Hospital"] == "probable"
-    assert statuses["Riverside Clinic"] == "ambiguous"
-    assert statuses["Hilltop Clinic"] == "none"
+    assert match_status(general) == match_status(records["REG-1"]) == "exact"
+    assert match_status(abbreviated) == "exact"
+    assert [match_status(r) for r in named["Northside Hospital"]] == ["probable"]
+    assert [match_status(r) for r in named["Riverside Clinic"]] == ["ambiguous", "ambiguous"]
+    assert [match_status(r) for r in named["Hilltop Clinic"]] == ["none"]
     for name in ("Northside Hospital", "Riverside Clinic", "Hilltop Clinic"):
-        assert any(x.startswith("Building match: ") for x in records[name].limitations), name
+        for record in named[name]:
+            assert any(x.startswith("Building match: ") for x in record.limitations), record.id
     assert not any(x.startswith("Building match: ") for x in general.limitations)
 
 
@@ -329,7 +365,18 @@ def test_validation_and_the_report_name_the_open_problems(run: dict[str, Any]) -
     assert 0 < validated["score"] < 1
     checks = Counter(f["check"] for f in validated["findings"])
     assert checks["missing_geometry"] == 1
-    assert checks["conflicts"] >= 1
+    assert checks["conflicts"] == 0, "nothing merged, so no values disagree within a record"
+    duplicates = sorted(
+        (f["record_id"], f["message"]) for f in validated["findings"] if f["check"] == "duplicates"
+    )
+    # Every pair kept apart for review is flagged again: the hospital's three records and
+    # the register's repeat of Riverside Clinic.
+    assert duplicates == [
+        ("fixture:poi-01", "same name as REG-1 within 25 m"),
+        ("fixture:poi-02", "same name as REG-1 within 25 m"),
+        ("fixture:poi-02", "same name as fixture:poi-01 within 25 m"),
+        ("fixture:poi-04", "same name as REG-4 within 25 m"),
+    ]
     report = json.loads(
         (run["exports"] / "sample-town-health-quality.json").read_text(encoding="utf-8")
     )

@@ -21,6 +21,7 @@ These exist because geographic data gets used for navigation, emergency planning
 3. **Uncertainty is a result.** An ambiguous geocode or building match stays ambiguous, with its candidates. Report it; don't resolve it by picking the nearest or the first.
 4. **Respect licences and usage policies.** Keep the attribution lines tools return; OpenStreetMap data needs "© OpenStreetMap contributors". Public services have rate and bulk limits, so ask the user before a large external job.
 5. **Only registered stages run.** Specs and tool inputs are data. Don't try to make the server run code, and never present a result you did not get from a tool as if you had.
+6. **A refusal is an answer.** If a tool or your environment refuses an action (a file write, a path, a command, a network call), don't retry it with another tool, a shell command or a script. Say what was refused and why, and give the content in your reply instead. If you are a subagent, return reports and findings as text; whoever started you saves them.
 
 ## Step 0: find out what you can execute
 
@@ -77,7 +78,7 @@ The record format, evidence and confidence rules are in [references/evidence-and
 
 ### 5. Resolve
 
-Run `normalize_records`, then `deduplicate_entities`. When merged records disagree, every value is kept under `conflicts` and the record is marked `conflicting`. Investigate conflicts that matter to the user (opening hours, capacity, status) with targeted research; don't pick a winner silently. Several sites of one organisation stay separate records.
+Run `normalize_records`, then `deduplicate_entities`. Records merge only when site-level evidence confirms they are one place: a shared site identifier (a register code, with its key in `site_keys`, or a Wikidata item you checked names the facility, listed in `wikidata_sites`) or a matching street address with a house number. A shared website, phone or email is organisation-level: it links records by `organisation_id` but never merges them, and a differing one does not keep a confirmed site apart. A shared Wikidata item merges nothing until you classify it; see [entity resolution](workflows/entity-resolution.md). Look-alikes left apart are marked `Possible duplicate of <id>` in their `limitations`, with the reason, for you to research. When merged records disagree, every value is kept under `conflicts` and the record is marked `conflicting`. Investigate conflicts that matter to the user (opening hours, capacity, status) with targeted research; don't pick a winner silently. Several sites of one organisation stay separate records.
 
 ### 6. Locate and match buildings
 

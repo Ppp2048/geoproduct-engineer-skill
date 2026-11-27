@@ -14,13 +14,14 @@ The user has a layer (their own dataset, a published map, a GIS project) and wan
 1. **Load the existing data** with `create_dataset(file=...)`. Keep its ids. Record its source as the user's (`user_file`), with the date it was exported.
 2. **Build the new data** as usual: research, files or map data.
 3. **Normalise both the same way:** the same category mapping, the same aliases, the same coordinate decimals.
-4. **Combine and deduplicate:** `create_dataset(dataset_ids=[existing, new])`, then `deduplicate_entities`. Merged records are entities both sides have. Their `merged` entries show which ids joined, and their `conflicts` show every value that differs.
+4. **Combine and deduplicate:** `create_dataset(dataset_ids=[existing, new])`, then `deduplicate_entities`. Merged records are entities both sides have. Their `merged` entries show which ids joined, and their `conflicts` show every value that differs. A pair with a similar name nearby but no site identifier or matching street address is not merged, and neither is a pair that shares only a website, phone or email: both records are marked `Possible duplicate of <id>` in their `limitations`. If the user's layer carries a register code or another site identifier, pass its key as `site_keys` so that matching records merge. A shared `wikidata` item merges only once you have checked it names the facility and listed it in `wikidata_sites`.
 5. **Classify the outcome per record:**
 
    | Outcome | Meaning | Action |
    |---|---|---|
    | Matched, no conflicts | Both agree | Keep the existing id; add the new evidence |
    | Matched, conflicts | Both describe it, differently | Apply the user's rule per attribute, or report it for review |
+   | Possible duplicate | Looks like an existing record, but nothing confirms it | Research the pair; don't add it as new until it is settled |
    | Only in the new data | Possibly missing from the map | Add it, with its evidence and confidence |
    | Only in the existing data | Possibly closed, or missing from the new sources | Don't delete; flag it for checking |
    | Moved (matched by id or name, far apart) | Relocated, or one side is wrong | Investigate before updating the geometry |

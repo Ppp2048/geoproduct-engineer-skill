@@ -1,8 +1,8 @@
 """Preparation stages: normalising, deduplicating and geocoding records."""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 
-from pydantic import Field, JsonValue
+from pydantic import Field, JsonValue, StringConstraints, model_validator
 
 from geoproduct.engine.data import DataKind, RecordSet
 from geoproduct.engine.stage import Reject, StageContext, StageRef, StageResult, stage
@@ -14,7 +14,15 @@ from geoproduct.providers.base import (
     GeocodeQuery,
     ProviderResult,
 )
-from geoproduct.resolve.dedupe import DedupeSettings, resolve
+from geoproduct.resolve.dedupe import (
+    BRAND_KEYS,
+    ORGANISATION_KEYS,
+    SITE_KEYS,
+    WIKIDATA,
+    DedupeSettings,
+    qid,
+    resolve,
+)
 from geoproduct.resolve.text import name_key
 from geoproduct.schemas import (
     Area,
@@ -172,15 +180,83 @@ def _round(value: Any, decimals: int) -> Any:
 # resolve.deduplicate -----------------------------------------------------------------------
 
 
+WikidataItem = Annotated[str, StringConstraints(pattern=r"^\s*[Qq][1-9][0-9]{0,11}\s*$")]
+"""A Wikidata item id, such as ``Q42``."""
+
+
 class DedupeParams(Contract):
     name_threshold: Annotated[float, Field(ge=0.5, le=1.0)] = 0.88
     max_distance_m: Annotated[float, Field(gt=0, le=5_000)] = 150.0
-    id_keys: list[ShortText] = Field(
-        default_factory=lambda: ["website", "phone", "email", "wikidata"]
-    )
-    """Identifiers that mark two records as the same entity (or organisation)."""
+    site_keys: list[ShortText] | None = None
+    """Identifiers that name one physical site, such as a register or facility code. A
+    shared value, with compatible names, nearby positions and nothing contradicting it,
+    merges records. Default: none. ``wikidata`` cannot be one: list the Wikidata items that
+    name a site in ``wikidata_sites``."""
+    organisation_keys: list[ShortText] | None = None
+    """Identifiers an organisation shares across its sites. A shared value links records to
+    one organisation but never merges them on its own, and a differing value does not keep
+    them apart. Default: website, phone, email, brand:wikidata, operator:wikidata."""
+    wikidata_sites: list[WikidataItem] | None = None
+    """Wikidata items known to name one establishment (checked on the item: an instance of a
+    facility, with coordinates at the site). Only these let a shared ``wikidata`` merge."""
+    wikidata_organisations: list[WikidataItem] | None = None
+    """Wikidata items known to name a company, brand, chain or operator. They link records,
+    like an organisation key. Items given as a record's brand or operator count too."""
+    id_keys: list[ShortText] | None = None
+    """The older single list. In it, website, phone and email count as organisation-level,
+    ``wikidata`` is classified item by item, and every other key counts as site-level. It
+    fills only a list that is not given."""
     same_category: bool = True
     """Only compare records with the same category (when both have one)."""
+
+    @model_validator(mode="after")
+    def _each_key_has_one_level(self) -> Self:
+        both = set(self.site_keys or ()) & set(self.organisation_keys or ())
+        if both:
+            raise ValueError(
+                f"{', '.join(sorted(both))} cannot be both a site key and an organisation key"
+            )
+        classified = set(self.site_keys or ()) & {WIKIDATA, *BRAND_KEYS}
+        if classified:
+            raise ValueError(
+                f"{', '.join(sorted(classified))} cannot be a site key: list the Wikidata "
+                "items that name one establishment in wikidata_sites"
+            )
+        twice = {qid(q) for q in self.wikidata_sites or ()} & {
+            qid(q) for q in self.wikidata_organisations or ()
+        }
+        if twice:
+            raise ValueError(
+                f"{', '.join(sorted(twice))} cannot be both in wikidata_sites and in "
+                "wikidata_organisations"
+            )
+        return self
+
+    def settings(self) -> DedupeSettings:
+        """Resolve the defaults: an explicit list wins, ``id_keys`` comes next, then the
+        built-in lists. A key given at one level is dropped from the other's default."""
+        site_default, org_default = list(SITE_KEYS), list(ORGANISATION_KEYS)
+        if self.id_keys is not None:
+            classified = {WIKIDATA, *BRAND_KEYS}
+            site_default = [
+                k for k in self.id_keys if k not in ORGANISATION_KEYS and k not in classified
+            ]
+            org_default = [k for k in self.id_keys if k in ORGANISATION_KEYS]
+        site = self.site_keys
+        org = self.organisation_keys
+        if site is None:
+            site = [k for k in site_default if k not in (org or ())]
+        if org is None:
+            org = [k for k in org_default if k not in site]
+        return DedupeSettings(
+            name_threshold=self.name_threshold,
+            max_distance_m=self.max_distance_m,
+            site_keys=tuple(dict.fromkeys(site)),
+            organisation_keys=tuple(dict.fromkeys(org)),
+            wikidata_sites=frozenset(self.wikidata_sites or ()),
+            wikidata_organisations=frozenset(self.wikidata_organisations or ()),
+            same_category=self.same_category,
+        )
 
 
 @stage(
@@ -188,24 +264,35 @@ class DedupeParams(Contract):
     params=DedupeParams,
     input=DataKind.records,
     output=DataKind.records,
-    summary="Merge records that describe the same entity, keeping disagreeing values side by "
-    "side as conflicts. Far-apart sites sharing an identifier are linked as one organisation.",
+    summary="Merge records that describe one physical site: confirmed by a shared site-level "
+    "identifier (such as a register code, or a Wikidata item known to name the site) or a "
+    "matching street address, with compatible names, nearby, and not contradicted by "
+    "site-level evidence. Disagreeing values are kept side by side as conflicts. "
+    "Organisation-level identifiers (website, phone, email, brand), Wikidata items of "
+    "unknown meaning and similar names never merge on their own: such records are linked as "
+    "one organisation and, when close, marked as possible duplicates for review.",
 )
 def deduplicate(ctx: StageContext, data: RecordSet, params: DedupeParams) -> StageResult:
     ctx.check()
-    resolution = resolve(
-        data.records,
-        DedupeSettings(
-            name_threshold=params.name_threshold,
-            max_distance_m=params.max_distance_m,
-            id_keys=tuple(params.id_keys),
-            same_category=params.same_category,
-        ),
-    )
+    settings = params.settings()
+    resolution = resolve(data.records, settings)
     notes = [
         f"merged {resolution.merges} duplicate record(s)",
         f"linked {resolution.organisations} multi-site organisation(s)",
+        f"kept {resolution.possible} possible duplicate pair(s) apart for review",
     ]
+    if resolution.spread:
+        notes.append(
+            f"compared {resolution.spread} identifier value(s) as organisation-level: records "
+            f"at distinct sites (more than {settings.max_distance_m:g} m apart, at different "
+            "addresses, or with different site identifiers) carry each"
+        )
+    if resolution.unclassified:
+        notes.append(
+            f"merged nothing on {resolution.unclassified} shared Wikidata item(s) of unknown "
+            "meaning: list items that name one establishment in wikidata_sites, or "
+            "organisations in wikidata_organisations"
+        )
     return StageResult(data.model_copy(update={"records": resolution.records}), notes=notes)
 
 

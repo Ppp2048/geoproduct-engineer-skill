@@ -6,7 +6,7 @@ and every result says so.
 
 | Pipeline | What it shows |
 |---|---|
-| [`hospitals.yaml`](pipelines/hospitals.yaml) | Collect hospitals and clinics, merge a duplicate (its bed counts disagree, so both values are kept as a conflict), match building footprints, score confidence, validate, gate, export GeoJSON |
+| [`hospitals.yaml`](pipelines/hospitals.yaml) | Collect hospitals and clinics, keep the two records named Sample General Hospital apart (they share only a website, so they are linked as one organisation and marked as possible duplicates), match building footprints, score confidence, validate, gate, export GeoJSON |
 | [`commercial-buildings.yaml`](pipelines/commercial-buildings.yaml) | Combine several feature queries, link two sites of one organisation, replace points with matched footprints, measure floor area, add the district, export CSV and GeoJSON |
 | [`transport.yaml`](pipelines/transport.yaml) | Check stops against spatial rules: near a street, not in a park, inside a district. One stop is deliberately 100 m from any street. |
 | [`csv-enrich.yaml`](pipelines/csv-enrich.yaml) | Import [`data/sample-facilities.csv`](data/sample-facilities.csv). Rows without coordinates are geocoded; one row is rejected; an address that does not exist stays unresolved, with the reason recorded. |

@@ -5,7 +5,9 @@ caller cannot run arbitrary queries. Every query has a server-side timeout and a
 limit, runs one at a time, and is cached in the workspace.
 
 Overpass answers a query that ran out of time or memory with HTTP 200 and a ``remark``.
-Such partial answers are refused rather than returned as if they were complete.
+Such partial answers, and answers without an ``elements`` list, are refused rather than
+returned as if they were complete, and are never cached: a busy server must not block the
+same query until the cache expires.
 """
 
 import re
@@ -109,6 +111,34 @@ def area_filters(area: Area) -> list[str]:
     return filters
 
 
+PARTIAL_REMARKS: Final = ("error", "timed out", "timeout", "out of memory")
+"""Words in an Overpass ``remark`` that mean the query stopped before it finished."""
+
+
+def incomplete(data: Any) -> GeoProductError | None:
+    """Why an Overpass answer cannot be used as a complete result, or ``None`` if it can.
+
+    Used as the HTTP client's check, so a refused answer is neither returned nor cached.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("elements"), list):
+        return GeoProductError(
+            ErrorCode.provider_error,
+            "Overpass answered without a list of elements.",
+            details={"provider": "overpass"},
+            hint="Check the endpoint setting; try again later.",
+        )
+    remark = str(data.get("remark") or "")
+    if any(word in remark.lower() for word in PARTIAL_REMARKS):
+        timed_out = "timed out" in remark.lower() or "timeout" in remark.lower()
+        return GeoProductError(
+            ErrorCode.timeout if timed_out else ErrorCode.provider_error,
+            "Overpass stopped the query before it finished; the answer would be incomplete.",
+            details={"provider": "overpass", "remark": remark[:300]},
+            hint="Try again later, or query a smaller area or fewer tags.",
+        )
+    return None
+
+
 def build_query(
     selectors: Sequence[str], area: Area, limit: int, timeout_s: int, *, tags: str = ""
 ) -> str:
@@ -193,18 +223,11 @@ class OverpassProvider(Provider):
         return ProviderResult[BuildingFootprint](items=footprints, **meta)
 
     def _run(self, text: str) -> tuple[HttpResult, list[dict[str, Any]], str | None]:
-        result = self.client.post_json(self.endpoint, {"data": text}, timeout_s=self.timeout_s + 30)
-        data = result.data if isinstance(result.data, dict) else {}
-        remark = str(data.get("remark") or "")
-        if "error" in remark.lower():
-            code = ErrorCode.timeout if "timed out" in remark.lower() else ErrorCode.provider_error
-            raise GeoProductError(
-                code,
-                "Overpass stopped the query before it finished; the answer would be incomplete.",
-                details={"provider": "overpass", "remark": remark[:300]},
-                hint="Query a smaller area or fewer tags.",
-            )
-        elements = [e for e in data.get("elements") or [] if isinstance(e, dict)]
+        result = self.client.post_json(
+            self.endpoint, {"data": text}, timeout_s=self.timeout_s + 30, check=incomplete
+        )
+        data = result.data
+        elements = [e for e in data["elements"] if isinstance(e, dict)]
         timestamp = (data.get("osm3s") or {}).get("timestamp_osm_base")
         return result, elements, str(timestamp)[:200] if timestamp else None
 

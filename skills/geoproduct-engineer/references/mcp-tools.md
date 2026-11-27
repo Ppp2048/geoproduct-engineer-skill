@@ -48,7 +48,7 @@ The server's full input and output schemas are published with each tool. This pa
 |---|---|---|
 | `create_dataset` | A records dataset from exactly one input | `records` with `evidence` (and `source_ids`), or `file` (with `format`, `columns`, `category`, `licence`), or `source_id` (a fetched CSV, JSON or GeoJSON), or `dataset_ids` (two or more records datasets to combine); `name` |
 | `normalize_records` | Tidy names, categories, addresses and coordinates | **`dataset_id`**, `categories` (old to new), `aliases` (canonical name to alternatives), `coordinate_decimals` (7) |
-| `deduplicate_entities` | Merge records describing the same entity; keep conflicts | **`dataset_id`**, `name_threshold` (0.88), `max_distance_m` (150), `id_keys` (website, phone, email, wikidata), `same_category` (true) |
+| `deduplicate_entities` | Merge records confirmed as one site; keep conflicts; link one organisation's sites; mark unconfirmed look-alikes as possible duplicates | **`dataset_id`**, `name_threshold` (0.88), `max_distance_m` (150), `site_keys` (none), `organisation_keys` (website, phone, email, brand:wikidata, operator:wikidata), `wikidata_sites` (items that name one establishment), `wikidata_organisations` (items that name an organisation), `id_keys` (older single list), `same_category` (true) |
 | `match_building_footprints` | Link records to footprints, with a status and reasons | **`dataset_id`**, **`buildings_dataset_id`**, `max_distance_m` (30), `assign_geometry` (`none`, `exact`, `exact_or_probable`), `options` (`min_radius_m` 5, `name_threshold` 0.85, `ambiguity_margin` 0.1, `max_candidates` 5) |
 | `enrich_records` | Spatial context | **`dataset_id`**, **`operation`**: `nearby` (needs `reference_dataset_id` and `field`; optional `radius_m` (500), `categories`, `options.max_ids` (10)), `within` (needs `reference_dataset_id`, `field`; `options.label` `name` or `id`), `measure` (`options.measures`: `area` and/or `length`, both by default) |
 | `score_confidence` | Per-record confidence level and reasons | **`dataset_id`**, `high` (0.75), `medium` (0.5), `low` (0.25) |
@@ -65,8 +65,8 @@ The server's full input and output schemas are published with each tool. This pa
 
 | Tool | Purpose | Main parameters |
 |---|---|---|
-| `create_geo_pipeline` | Check a spec and record it as a pending run. Returns the plan, the external-request estimate and warnings. | `spec` (object, YAML or JSON text) or `spec_path`; `params` |
-| `run_geo_pipeline` | Start a pending run, resume a failed or cancelled one, or create and start a new one. Returns at once. | `run_id`, or `spec` / `spec_path`; `params`; `confirm` (only after the user agrees to the estimate) |
+| `create_geo_pipeline` | Check a spec and record it as a pending run. Returns the plan, the external-request estimate and warnings. Checking the same spec again returns the same run. | `spec` (object, YAML or JSON text) or `spec_path`; `params` |
+| `run_geo_pipeline` | Start a pending run, resume a failed or cancelled one, or create and start a new one. Returns at once. A spec refused for want of `confirm` keeps one pending run, whose `run_id` the error gives; repeating the call reuses it. | `run_id`, or `spec` / `spec_path`; `params`; `confirm` (only after the user agrees to the estimate) |
 | `get_pipeline_status` | Status per stage, progress, error, and whether a worker is active | **`run_id`** |
 | `get_pipeline_results` | Finished stages' outputs as dataset ids with previews | **`run_id`** |
 | `cancel_geo_pipeline` | Ask a run to stop between items | **`run_id`** |

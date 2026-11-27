@@ -12,7 +12,7 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PurePath
-from typing import Any, Final
+from typing import Any, BinaryIO, Final
 
 from pydantic import BaseModel
 
@@ -125,6 +125,16 @@ class Workspace:
     def read_text(target: Path) -> str:
         """Read a file this workspace writes, which another thread may be replacing."""
         return _shared(lambda: target.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def read_bytes(target: Path) -> bytes:
+        """Read a file this workspace writes, which another thread may be replacing."""
+        return _shared(target.read_bytes)
+
+    @staticmethod
+    def open_binary(target: Path) -> BinaryIO:
+        """Open a file this workspace writes for reading in parts, as :meth:`read_bytes`."""
+        return _shared(lambda: target.open("rb"))
 
     @staticmethod
     def read_json(target: Path) -> Any:

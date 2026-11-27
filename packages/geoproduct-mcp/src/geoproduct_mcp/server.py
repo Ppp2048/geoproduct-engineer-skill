@@ -17,6 +17,7 @@ from importlib import resources
 from typing import Annotated, Any, Final, Literal
 
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import CallToolResult, ToolAnnotations
 from pydantic import Field, JsonValue
 
@@ -436,19 +437,56 @@ def _records(server: MCPServer, state: ServerState) -> None:
         dataset_id: DatasetId,
         name_threshold: Annotated[float, Field(ge=0.5, le=1.0)] = 0.88,
         max_distance_m: Annotated[float, Field(gt=0, le=5000)] = 150.0,
+        site_keys: Annotated[
+            list[str] | None,
+            Field(
+                description="Identifiers that name one physical site, such as a register "
+                "code (default: none; wikidata cannot be one). A shared value can merge "
+                "records."
+            ),
+        ] = None,
+        organisation_keys: Annotated[
+            list[str] | None,
+            Field(
+                description="Identifiers an organisation shares across its sites (default: "
+                "website, phone, email, brand:wikidata, operator:wikidata). They link "
+                "records, never merge them, and a differing value does not keep them apart."
+            ),
+        ] = None,
+        wikidata_sites: Annotated[
+            list[str] | None,
+            Field(
+                description="Wikidata items (Q ids) checked to name one establishment. Only "
+                "these let a shared wikidata value merge records."
+            ),
+        ] = None,
+        wikidata_organisations: Annotated[
+            list[str] | None,
+            Field(
+                description="Wikidata items (Q ids) checked to name a company, brand, chain "
+                "or operator. They link records."
+            ),
+        ] = None,
         id_keys: Annotated[
             list[str] | None,
             Field(
-                description="Identifiers that mark the same entity (default: website, "
-                "phone, email, wikidata)."
+                description="Older single list: website, phone and email in it are "
+                "organisation-level, wikidata is classified item by item, other keys are "
+                "site-level."
             ),
         ] = None,
         same_category: bool = True,
         name: NewName = None,
     ) -> Annotated[CallToolResult, DatasetResult]:
-        """Merge records describing the same entity. Disagreeing values are kept side by
-        side as conflicts; far-apart sites sharing an identifier are linked as one
-        organisation, not merged."""
+        """Merge records describing one physical site: confirmed by a shared site-level
+        identifier or a matching street address with a house number, with compatible names,
+        nearby, and with no differing site-level identifier or address. Every pair in a
+        merged group must match. A shared website, phone, email or brand, or a Wikidata item
+        not listed in wikidata_sites, never merges records on its own: such records are
+        linked by organisation_id. An identifier carried by records at distinct sites counts
+        as organisation-level. Look-alikes that do not merge stay separate, each marked
+        "Possible duplicate of <id>" in its limitations with the reason, for review.
+        Disagreeing values in a merge are kept side by side as conflicts."""
         return await call(
             lambda job: record_tools.deduplicate_entities(
                 state,
@@ -456,6 +494,10 @@ def _records(server: MCPServer, state: ServerState) -> None:
                 dataset_id=dataset_id,
                 name_threshold=name_threshold,
                 max_distance_m=max_distance_m,
+                site_keys=site_keys,
+                organisation_keys=organisation_keys,
+                wikidata_sites=wikidata_sites,
+                wikidata_organisations=wikidata_organisations,
                 id_keys=id_keys,
                 same_category=same_category,
                 name=name,
@@ -836,6 +878,33 @@ def _loopback(host: str) -> bool:
         return False
 
 
+STANDARD_LOOPBACK: Final = ("127.0.0.1", "localhost", "[::1]")
+"""Names a client may use for the standard loopback addresses, as the SDK allows them."""
+
+
+def transport_security(host: str, port: int) -> TransportSecuritySettings:
+    """DNS-rebinding protection for the loopback address the server listens on (audit GP-05).
+
+    The SDK turns it on by itself only for 127.0.0.1, localhost and ::1, so another loopback
+    address such as 127.0.0.2 was served without it. A request whose Host header names any
+    other address is refused (421), and so is one whose Origin does (403).
+    """
+    try:
+        address = ipaddress.ip_address(host)
+        name = f"[{address.compressed}]" if address.version == 6 else address.compressed
+    except ValueError:
+        name = host  # localhost, the only name _loopback accepts
+    names = STANDARD_LOOPBACK if name in STANDARD_LOOPBACK else (name,)
+    hosts = [f"{n}:*" for n in names]
+    origins = [f"http://{n}:*" for n in names]
+    if port == 80:  # a client leaves the default port out
+        hosts += names
+        origins += [f"http://{n}" for n in names]
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="geoproduct-mcp",
@@ -876,7 +945,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"geoproduct-mcp: {exc.error.message}", file=sys.stderr)
         return 2
     if args.http:
-        server.run("streamable-http", host=args.host, port=args.port)
+        server.run(
+            "streamable-http",
+            host=args.host,
+            port=args.port,
+            transport_security=transport_security(args.host, args.port),
+        )
     else:
         server.run("stdio")
     return 0

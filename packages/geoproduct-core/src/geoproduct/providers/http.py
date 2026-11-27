@@ -7,7 +7,9 @@ Every live provider gets the same behaviour:
 - a throttle that spaces requests and limits how many run at once, per provider, across all
   threads of this process;
 - an on-disk cache of successful responses in the workspace, so repeated queries cost nothing
-  and a resumed run does not query again;
+  and a resumed run does not query again. A provider can pass a ``check`` that refuses an
+  answer (one a service marked as partial, for example); a refused answer is never cached,
+  and a cached one the check refuses is dropped and asked for again;
 - size and time limits on every response;
 - a few short retries on transient failures, and otherwise an error with a stable code
   (``rate_limited``, ``provider_unavailable``, ``timeout``, ``provider_error``, ``too_large``)
@@ -42,11 +44,16 @@ ENV_USER_AGENT: Final = "GEOPRODUCT_USER_AGENT"
 ENV_CACHE_TTL_HOURS: Final = "GEOPRODUCT_CACHE_TTL_HOURS"
 DEFAULT_CACHE_TTL_HOURS: Final = 24 * 7
 MAX_RESPONSE_BYTES: Final = 50 * 1024 * 1024
+EXCERPT_BYTES: Final = 4000
+"""How much of an error answer is read: enough for its excerpt, never the whole body."""
 CONNECT_TIMEOUT_S: Final = 10.0
 """How long to wait for a connection. An answer may take much longer (an Overpass query
 runs for minutes), but a host that has not accepted the connection by now is unreachable."""
 SPACING_MARGIN: Final = 1.05
 """Requests are spaced 5% further apart than a policy's rate, to stay clear of its limit."""
+
+Check = Callable[[Any], GeoProductError | None]
+"""Checks a parsed answer before it is used or cached: the error if it must be refused."""
 
 _USER_AGENT = re.compile(r"^[\x20-\x7e]{3,200}$")
 _TAGS = re.compile(r"<[^>]+>")
@@ -208,6 +215,12 @@ class ResponseCache:
             return None
         return CachedBody(body, retrieved_at)
 
+    def drop(self, key: str) -> None:
+        """Forget one response, e.g. one a provider no longer accepts. If the file cannot be
+        removed now, the next successful answer replaces it."""
+        with suppress(OSError):
+            self._path(key).unlink(missing_ok=True)
+
     def put(self, key: str, url: str, body: bytes, retrieved_at: datetime) -> None:
         try:
             text = body.decode("utf-8")
@@ -244,8 +257,21 @@ def retry_after_seconds(value: str | None, now: datetime | None = None) -> float
     return max(0.0, (when - (now or datetime.now(UTC))).total_seconds())
 
 
+def _head(response: httpx2.Response, limit: int) -> bytes:
+    """At most ``limit`` bytes of a streamed body. The rest is never read: closing the
+    response drops it with the connection."""
+    chunks: list[bytes] = []
+    size = 0
+    for chunk in response.iter_bytes():
+        chunks.append(chunk)
+        size += len(chunk)
+        if size >= limit:
+            break
+    return b"".join(chunks)[:limit]
+
+
 def _excerpt(body: bytes, limit: int = 300) -> str:
-    text = _TAGS.sub(" ", body[:4000].decode("utf-8", errors="replace"))
+    text = _TAGS.sub(" ", body[:EXCERPT_BYTES].decode("utf-8", errors="replace"))
     return " ".join(text.split())[:limit]
 
 
@@ -296,13 +322,20 @@ class HttpClient:
                 self._client.close()
                 self._client = None
 
-    def get_json(self, url: str, params: Mapping[str, str]) -> HttpResult:
-        return self._request("GET", url, params, {}, None)
+    def get_json(
+        self, url: str, params: Mapping[str, str], *, check: Check | None = None
+    ) -> HttpResult:
+        return self._request("GET", url, params, {}, None, check)
 
     def post_json(
-        self, url: str, form: Mapping[str, str], *, timeout_s: float | None = None
+        self,
+        url: str,
+        form: Mapping[str, str],
+        *,
+        timeout_s: float | None = None,
+        check: Check | None = None,
     ) -> HttpResult:
-        return self._request("POST", url, {}, form, timeout_s)
+        return self._request("POST", url, {}, form, timeout_s, check)
 
     def _request(
         self,
@@ -311,10 +344,15 @@ class HttpClient:
         params: Mapping[str, str],
         form: Mapping[str, str],
         timeout_s: float | None,
+        check: Check | None,
     ) -> HttpResult:
         key = ResponseCache.key(method, url, params, form)
         if self._cache is not None and (hit := self._cache.get(key)) is not None:
-            return HttpResult(self._parse(hit.body), hit.retrieved_at, True, 0)
+            data = self._parse(hit.body)
+            if check is None or check(data) is None:
+                return HttpResult(data, hit.retrieved_at, True, 0)
+            # Cached before it was checked (by an earlier version): ask the service again.
+            self._cache.drop(key)
         attempt = 0
         while True:
             attempt += 1
@@ -327,6 +365,8 @@ class HttpClient:
                     raise
                 self._sleep(wait)
         data = self._parse(body)
+        if check is not None and (refused := check(data)) is not None:
+            raise refused
         retrieved_at = self._now()
         if self._cache is not None:
             self._cache.put(key, url, body, retrieved_at)
@@ -418,7 +458,7 @@ class HttpClient:
                 **details,
             )
         with suppress(httpx2.HTTPError):
-            details["excerpt"] = _excerpt(response.read())
+            details["excerpt"] = _excerpt(_head(response, EXCERPT_BYTES))
         hint = "Check the query parameters."
         if status in (401, 403):
             hint = (

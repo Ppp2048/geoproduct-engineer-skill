@@ -212,6 +212,10 @@ def deduplicate_entities(
     dataset_id: str,
     name_threshold: float = 0.88,
     max_distance_m: float = 150.0,
+    site_keys: list[str] | None = None,
+    organisation_keys: list[str] | None = None,
+    wikidata_sites: list[str] | None = None,
+    wikidata_organisations: list[str] | None = None,
     id_keys: list[str] | None = None,
     same_category: bool = True,
     name: str | None = None,
@@ -221,8 +225,14 @@ def deduplicate_entities(
         "max_distance_m": max_distance_m,
         "same_category": same_category,
     }
-    if id_keys is not None:
-        params["id_keys"] = id_keys
+    keys = {
+        "site_keys": site_keys,
+        "organisation_keys": organisation_keys,
+        "wikidata_sites": wikidata_sites,
+        "wikidata_organisations": wikidata_organisations,
+        "id_keys": id_keys,
+    }
+    params |= {key: value for key, value in keys.items() if value is not None}
     return _record_stage(
         state, job, "resolve.deduplicate", "deduplicate_entities", dataset_id, params, name=name
     )

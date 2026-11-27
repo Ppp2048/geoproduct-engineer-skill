@@ -52,7 +52,7 @@ Kinds: `records`, `buildings`, `report`, `files`. A parameter in **bold** is req
 | `collect.buildings` | – → buildings | **`provider`**, **`area`**, `limit` [10000], `allow_truncated` [false] |
 | `combine.records` | records → records | **`add`**: a list of `{stage: id}`. A repeated record id is rejected. |
 | `normalize.records` | records → records | `categories`, `aliases`, `coordinate_decimals` [7] |
-| `resolve.deduplicate` | records → records | `name_threshold` [0.88], `max_distance_m` [150], `id_keys`, `same_category` [true] |
+| `resolve.deduplicate` | records → records | `name_threshold` [0.88], `max_distance_m` [150], `site_keys` [none], `organisation_keys` [website, phone, email, brand:wikidata, operator:wikidata], `wikidata_sites`, `wikidata_organisations` (Wikidata items classified as one establishment or an organisation), `id_keys` (older single list), `same_category` [true] |
 | `geocode.records` | records → records | **`provider`**, `country_codes`, `bias` (an area), `min_score` [0.6], `ambiguity_margin` [0.05], `use_names` [true], `overwrite` [false] |
 | `match.buildings` | records → records | **`buildings`** (`{stage: id}`), `max_distance_m` [30], `min_radius_m` [5], `name_threshold` [0.85], `ambiguity_margin` [0.1], `max_candidates` [5], `assign_geometry` [none] |
 | `enrich.nearby` | records → records | **`reference`** (`{stage: id}`), **`name`** (the attribute to add), `radius_m` [500], `categories`, `max_ids` [10] |

@@ -70,6 +70,12 @@ SUFFIX_KINDS: Final = {
 
 GENERIC_TYPES: Final = frozenset({"application/octet-stream", "binary/octet-stream", ""})
 
+CARRIES_IPV4: Final = (
+    ipaddress.IPv6Network("64:ff9b::/96"),  # NAT64, well-known prefix (RFC 6052)
+    ipaddress.IPv6Network("::/96"),  # IPv4-compatible (deprecated by RFC 4291)
+)
+"""IPv6 ranges whose last 32 bits are an IPv4 address that the packets may reach."""
+
 
 @dataclass(frozen=True)
 class Fetched:
@@ -107,9 +113,15 @@ def _refused(message: str, url: str, hint: str | None = None) -> GeoProductError
 
 
 def is_public(address: str) -> bool:
+    """Whether an address is global. An IPv6 address that carries an IPv4 one is judged by
+    the IPv4 address: ``ipaddress`` calls ``64:ff9b::7f00:1`` global, but through a NAT64
+    gateway it reaches 127.0.0.1 (audit GP-10)."""
     ip = ipaddress.ip_address(address.split("%", 1)[0])
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif any(ip in network for network in CARRIES_IPV4):
+            ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
     return ip.is_global and not ip.is_multicast
 
 

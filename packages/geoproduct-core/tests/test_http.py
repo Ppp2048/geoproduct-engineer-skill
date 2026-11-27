@@ -4,7 +4,7 @@ No network: every response comes from an ``httpx2.MockTransport``.
 """
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -14,6 +14,7 @@ import pytest
 from geoproduct.errors import GeoProductError
 from geoproduct.providers.http import (
     CONNECT_TIMEOUT_S,
+    EXCERPT_BYTES,
     HttpClient,
     HttpSettings,
     ResponseCache,
@@ -167,6 +168,26 @@ def test_client_errors_are_not_retried_and_carry_an_excerpt() -> None:
     assert not error.retryable
     assert error.details["excerpt"] == "line 1: parse error: unexpected token"
     assert len(calls) == 1
+
+
+def test_a_large_error_answer_is_read_only_for_its_excerpt() -> None:
+    """Audit GP-07: a 4xx body was read whole, with no size limit. A 1 GiB error page is
+    now read only as far as the excerpt needs."""
+    sent: list[int] = []
+
+    def body() -> Iterator[bytes]:
+        for _ in range(1024 * 1024):
+            sent.append(1)
+            yield b"<p>" + b"x" * 1017 + b"</p>"
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(400, content=body())
+
+    with pytest.raises(GeoProductError) as caught:
+        make_client(handler).get_json("https://api.example.org/x", {})
+    assert caught.value.code == ErrorCode.provider_error
+    assert len(caught.value.error.details["excerpt"]) == 300  # type: ignore[arg-type]
+    assert len(sent) <= -(-EXCERPT_BYTES // 1024) + 1
 
 
 def test_a_forbidden_answer_points_at_the_user_agent() -> None:

@@ -1,4 +1,4 @@
 schema_version: "1.1"
 name: sample-town-hospitals-to-buildings
 expected_outcome: |
-  A GeoJSON file with four facilities (the two source records for Sample General Hospital merged into one) and a report.md that gives each one's building match and confidence, keeps the disagreement over beds instead of choosing a value, says that Sample Town is synthetic, and lists the limitations.
+  A GeoJSON file with five facility records and a report.md. The two records named Sample General Hospital ("Sample General Hospital" and "Sample General Hosp.") share only a website, which every site of an organisation can share, and nothing shows they are one site, so they stay two records, linked as one organisation and reported as possible duplicates for review. The report gives each record's building match and confidence, reports the disagreement over beds (110 against 120) instead of choosing a value, says that Sample Town is synthetic, and lists the limitations.

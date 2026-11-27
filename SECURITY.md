@@ -22,9 +22,9 @@ GeoProduct Engineer runs tools on behalf of an AI agent. The model's output, fet
 
 - **Code execution.** Code that runs on the user's machine and was not written by the user: from a pipeline spec, a tool argument, a fetched document or a provider response.
 - **File access.** Reading or writing outside the workspace and the allowed folders, for example by path traversal, links or archive contents.
-- **Network access.** Making `fetch_source_data` or a provider reach a private, loopback or link-local address (server-side request forgery), including through DNS or redirects. Bypassing `robots.txt`, the size or time limits, or the content-type allowlist.
+- **Network access.** Making `fetch_source_data` or a provider reach a private, loopback or link-local address (server-side request forgery), including through DNS, redirects or an IPv6 address that carries an IPv4 one (NAT64). Bypassing `robots.txt`, the size or time limits, or the content-type allowlist.
 - **Leaking secrets.** Exposing environment variables, credentials or local paths outside the workspace through tool results, logs, exports or error messages.
-- **Exposed transport.** Reaching the HTTP transport from beyond the loopback interface.
+- **Exposed transport.** Reaching the HTTP transport from beyond the loopback interface, including from a web page through DNS rebinding.
 - **Skipped confirmation.** Getting past the confirmation required for large external workloads, or replacing an existing export without `overwrite: true`.
 - **Tampered evidence.** Making evidence or provenance that the toolkit records as checked silently untrue.
 

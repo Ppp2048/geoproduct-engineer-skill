@@ -33,7 +33,10 @@ stages:
   - id: merged
     uses: resolve.deduplicate
     input: tidy
-    description: Two sources describing one hospital become one record; disagreements are kept.
+    description: >-
+      Records that a site identifier or a street address shows to be one site merge, and
+      their disagreements are kept. Records that share only a website or a similar name
+      stay apart as possible duplicates.
 
   - id: buildings
     uses: collect.buildings

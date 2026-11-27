@@ -82,7 +82,7 @@ uv run geoproduct run examples/pipelines/hospitals.yaml
 ```
 
 <p align="center">
-  <img src="docs/assets/quickstart.svg" width="100%" alt="Terminal: uv run geoproduct run examples/pipelines/hospitals.yaml. The run succeeds through ten stages: facilities, tidy, merged, buildings, matched, scored, validation, report, gate and geojson. The quality report's first line reads: Score 0.94.">
+  <img src="docs/assets/quickstart.svg" width="100%" alt="Terminal: uv run geoproduct run examples/pipelines/hospitals.yaml. The run succeeds through ten stages: facilities, tidy, merged, buildings, matched, scored, validation, report, gate and geojson. The quality report's first line reads: Score 0.95.">
   <br>
   <sub>A replay of a real run of this example. Run IDs differ each time.</sub>
 </p>
@@ -90,8 +90,8 @@ uv run geoproduct run examples/pipelines/hospitals.yaml
 The pipeline runs against **Sample Town**, a synthetic town built into the offline `fixture` provider. It is not a real place, and every result says so. The run:
 
 1. collects hospitals and clinics;
-2. merges a duplicate whose bed counts disagree, keeping both values;
-3. matches building footprints: one exact, one probable, one ambiguous, one with none;
+2. keeps the two records named Sample General Hospital apart: they share only a website, which does not identify a site, so it links them as one organisation and marks each as a possible duplicate for review;
+3. matches building footprints: two exact (both hospital records), one probable, one ambiguous, one with none;
 4. scores confidence;
 5. validates and gates the result;
 6. writes a quality report and a GeoJSON export.
@@ -102,16 +102,18 @@ The output is in `.geoproduct/runs/<run_id>/stages/`, with one folder per stage.
 <summary><b>See one record from the export</b> (abridged)</summary>
 <br>
 
-The merged hospital: two sources gave different bed counts, so both are kept and the value is left empty until someone resolves it. Evidence IDs are shortened here.
+One of the two hospital records. It shares only a website with the other record, and every site of an organisation can share a website, so the two are not merged: they are linked by `organisation_id`, and each says why in `limitations`. Evidence IDs are shortened here.
 
 ```jsonc
 {
   "name": "Sample General Hospital",
+  "organisation_id": "org_f35d…",
   "attributes": {
-    "beds":  { "basis": "fact", "evidence_ids": ["ev_430e…", "ev_7600…"], "note": "sources disagree; see conflicts" },
-    "phone": { "value": "+00 100 0001", "basis": "fact", "evidence_ids": ["ev_7600…"] }
+    "beds":    { "value": 110, "basis": "fact", "evidence_ids": ["ev_7600…"] },
+    "phone":   { "value": "+00 100 0001", "basis": "fact", "evidence_ids": ["ev_7600…"] },
+    "website": { "value": "https://general-hospital.example.org", "basis": "fact", "evidence_ids": ["ev_7600…"] }
   },
-  "location": { "kind": "entrance", "precision_m": 10.0, "evidence_ids": ["ev_430e…"] },
+  "location": { "kind": "centroid", "precision_m": 15.0, "evidence_ids": ["ev_7600…"] },
   "building_match": {
     "status": "exact",
     "building_ref": { "provider": "fixture", "id": "b-110" },
@@ -119,19 +121,12 @@ The merged hospital: two sources gave different bed counts, so both are kept and
                 "name agrees with footprint 'Sample General Hospital' (1.00)"]
   },
   "confidence": {
-    "level": "medium", "score": 0.6,
+    "level": "high", "score": 0.75,
     "reasons": ["one source describes it", "sources not evaluated", "exact building match",
-                "location: entrance", "sources disagree: attributes.beds"]
+                "location: centroid"]
   },
-  "status": "conflicting",
-  "conflicts": [{
-    "field": "attributes.beds",
-    "values": [{ "value": 120, "evidence_ids": ["ev_430e…"] },
-               { "value": 110, "evidence_ids": ["ev_7600…"] }],
-    "note": "sources disagree; the value is cleared until resolved"
-  }],
-  "merged": [{ "record_id": "fixture:poi-01", "score": 0.978,
-               "reasons": ["same website", "name similarity 1.00", "11 m apart"] }]
+  "status": "resolved",
+  "limitations": ["Possible duplicate of fixture:poi-02 (same website; name similarity 1.00; 11 m apart; not merged because they share only organisation-level details (website), which do not identify a site)."]
 }
 ```
 
@@ -141,19 +136,19 @@ The merged hospital: two sources gave different bed counts, so both are kept and
 <summary><b>See the quality report</b> (excerpt)</summary>
 <br>
 
-**Score: 0.94** (clean records count 1, records with only warnings count 0.75, records with errors count 0).
+**Score: 0.95** (clean records count 1, records with only warnings count 0.75, records with errors count 0).
 
 | Metric | Value |
 |---|---|
-| Records | 4 |
+| Records | 5 |
 | Evidence coverage of facts | 100% |
-| Conflicting | 25% |
-| Location kinds | approximate 2, centroid 1, entrance 1 |
-| Building matches | ambiguous 1, exact 1, none 1, probable 1 |
+| Conflicting | 0% |
+| Location kinds | approximate 2, centroid 2, entrance 1 |
+| Building matches | ambiguous 1, exact 2, none 1, probable 1 |
 
 | Severity | Check | Record | Message |
 |---|---|---|---|
-| warning | conflicts | `fixture:poi-02` | sources disagree on attributes.beds |
+| warning | duplicates | `fixture:poi-02` | same name as fixture:poi-01 within 25 m |
 
 The full report also gives the result of every check, and the licences and attribution of the sources.
 
@@ -199,7 +194,7 @@ Keeping them apart means each can be installed, versioned and replaced on its ow
 |---|---|
 | **Sources** | Register the sources the agent found, with ratings and a computed reliability score. Fetch them within limits: public addresses only, `robots.txt`, size and time caps. Keep their text so evidence excerpts can be checked. |
 | **Collection** | Geocode and reverse geocode. Query OpenStreetMap features with structured tag filters (no raw Overpass QL) and building footprints. Import CSV, GeoJSON or JSON files. |
-| **Preparation** | Normalise records. Merge duplicates, keeping disagreeing values as conflicts. Geocode records that have no location; public Nominatim is capped at 100 lookups per run. |
+| **Preparation** | Normalise records. Merge records confirmed as one site (a shared site identifier or street address), keeping disagreeing values as conflicts; link sites of one organisation; mark look-alikes for review. Geocode records that have no location; public Nominatim is capped at 100 lookups per run. |
 | **Building matching** | By containment and proximity, with name and address agreement. Every match states its status, method, score, reasons and candidates. |
 | **Enrichment** | Count nearby features, find the polygons a record falls in, measure area, length and perimeter. |
 | **Quality** | Per-record confidence with reasons. Dataset validation: coordinates, CRS, geometry, duplicates, area, outliers, evidence, conflicts and spatial rules. Quality gates. A Markdown and JSON quality report. |
@@ -330,7 +325,7 @@ The four example pipelines run offline:
 
 | Pipeline | Shows |
 |---|---|
-| [`hospitals.yaml`](examples/pipelines/hospitals.yaml) | Duplicates with conflicting values, building matches of every status, a quality gate |
+| [`hospitals.yaml`](examples/pipelines/hospitals.yaml) | A possible duplicate kept apart for review, building matches of every status, a quality gate |
 | [`commercial-buildings.yaml`](examples/pipelines/commercial-buildings.yaml) | Several queries combined, footprints in place of points, floor area, district lookup, CSV and GeoJSON |
 | [`transport.yaml`](examples/pipelines/transport.yaml) | Spatial rules: a stop far from any street is caught; a failing gate fixed by resuming with a new parameter |
 | [`csv-enrich.yaml`](examples/pipelines/csv-enrich.yaml) | A user CSV geocoded, with a bad row rejected and an unknown address left unresolved, with the reason |
@@ -436,17 +431,6 @@ For volume, point the providers at your own instance.
 - **Scale.** Datasets are held in memory, and a stage may output at most 100,000 records by default. That suits datasets of thousands to tens of thousands of records.
 - **Testing.** The skill has been evaluated on a few cases, which did not yet separate it from a capable agent without it.
 
-## Roadmap
-
-These are directions, not promises:
-
-- [ ] Publish `geoproduct-core` and `geoproduct-mcp` to PyPI
-- [ ] An Overture Maps provider for buildings and places, always limited to an area
-- [ ] GeoPackage and GeoParquet export
-- [ ] PDF text extraction for evidence checks
-- [ ] Harder skill evaluations, including cases that tempt invention, licence traps and conflicting sources
-- [ ] A provider plug-in interface
-
 ## Documentation
 
 | Document | Contents |
@@ -456,6 +440,7 @@ These are directions, not promises:
 | [docs/decisions.md](docs/decisions.md) | Build stages and the decisions taken, with reasons |
 | [docs/research.md](docs/research.md) | The research behind the design: related projects, libraries, providers and licensing |
 | [docs/releasing.md](docs/releasing.md) | Versioning and the release checklist |
+| [docs/evaluations.md](docs/evaluations.md) | Running the skill's test cases: roles, the reporting rule, provenance and grading |
 | [examples/](examples/README.md) | The example pipelines |
 | [skills/geoproduct-engineer/](skills/geoproduct-engineer/SKILL.md) | The Agent Skill |
 | [CHANGELOG.md](CHANGELOG.md) | Changes by version |

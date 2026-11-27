@@ -179,8 +179,9 @@ class Runner:
     def status(self, run_id: str) -> RunRecord:
         return self.store.load(run_id)
 
-    def output(self, run_id: str, stage_id: str) -> StageData:
-        """A finished stage's output."""
+    def output(self, run_id: str, stage_id: str, *, limit: int | None = None) -> StageData:
+        """A finished stage's output; with ``limit``, only its first items (see
+        :func:`geoproduct.engine.data.head`)."""
         manifest = self.store.read_manifest(run_id, stage_id)
         if manifest is None:
             raise GeoProductError(
@@ -190,7 +191,10 @@ class Runner:
             )
         plan = self.plan(self.store.load_spec(run_id))
         kind = plan.stage(stage_id).definition.output
-        return stage_data.load(kind, self.store.stage_dir(run_id, stage_id))
+        folder = self.store.stage_dir(run_id, stage_id)
+        if limit is not None:
+            return stage_data.head(kind, folder, limit)
+        return stage_data.load(kind, folder)
 
     def _execute(self, run_id: str, cancel_event: threading.Event) -> RunRecord:
         record = self.store.load(run_id)

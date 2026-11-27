@@ -22,7 +22,9 @@ from geoproduct.providers.base import (
     GeocodeQuery,
     ReverseGeocodeQuery,
 )
+from geoproduct.providers.http import HttpClient, HttpSettings, Throttle
 from geoproduct.providers.overpass import area_filters, build_query, quote, tag_filter
+from geoproduct.providers.overpass import incomplete as overpass_incomplete
 from geoproduct.providers.registry import ProviderRegistry, builtin_providers
 from geoproduct.schemas import Area, ErrorCode, LocationKind, RunStatus
 from geoproduct.workspace import Workspace
@@ -336,6 +338,110 @@ def test_overpass_partial_answers_are_refused(tmp_path: Path) -> None:
     with pytest.raises(GeoProductError) as caught:
         providers.get("overpass").features(FeatureQuery(area=Area(bbox=BOX), tags={"a": None}))
     assert caught.value.code == ErrorCode.timeout
+
+
+PARTIAL = {
+    "elements": [],
+    "remark": 'runtime error: Query timed out in "query" at line 3 after 90 seconds.',
+}
+
+
+def in_turn(*answers: Any, seen: list[httpx2.Request]) -> httpx2.MockTransport:
+    """Answers each request with the next answer; the last one repeats."""
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(200, json=answers[min(len(seen), len(answers)) - 1])
+
+    return httpx2.MockTransport(handler)
+
+
+def cached_bodies(workspace: Workspace) -> list[str]:
+    return [p.read_text("utf-8") for p in (workspace.root / "cache" / "http").rglob("*.json")]
+
+
+def test_overpass_partial_answer_does_not_poison_later_retries(tmp_path: Path) -> None:
+    seen: list[httpx2.Request] = []
+    workspace = Workspace(tmp_path).ensure()
+    transport = in_turn(PARTIAL, OVERPASS_ANSWER, seen=seen)
+    overpass = builtin_providers(workspace, AGENT, transport=transport).get("overpass")
+    query = FeatureQuery(area=Area(bbox=BOX), tags={"amenity": None})
+
+    with pytest.raises(GeoProductError) as caught:
+        overpass.features(query)
+    assert caught.value.code == ErrorCode.timeout
+    assert not any("runtime error" in body for body in cached_bodies(workspace))
+
+    retried = overpass.features(query)
+    assert len(seen) == 2, "the retry reached the service, not a cached partial answer"
+    assert retried.items
+    assert not retried.from_cache
+
+    again = overpass.features(query)
+    assert again.from_cache, "a complete answer is still cached"
+    assert len(seen) == 2
+
+
+def test_overpass_answers_without_elements_are_refused_and_not_cached(tmp_path: Path) -> None:
+    seen: list[httpx2.Request] = []
+    workspace = Workspace(tmp_path).ensure()
+    transport = in_turn({"osm3s": {}}, OVERPASS_ANSWER, seen=seen)
+    overpass = builtin_providers(workspace, AGENT, transport=transport).get("overpass")
+    query = FeatureQuery(area=Area(bbox=BOX), tags={"amenity": None})
+    with pytest.raises(GeoProductError) as caught:
+        overpass.features(query)
+    assert caught.value.code == ErrorCode.provider_error
+    assert overpass.features(query).items
+    assert len(seen) == 2
+
+
+def test_a_partial_answer_cached_by_an_earlier_version_is_asked_for_again(tmp_path: Path) -> None:
+    seen: list[httpx2.Request] = []
+    settings = HttpSettings(user_agent="test-suite/1.0", cache_dir=tmp_path / "cache")
+    client = HttpClient(
+        "overpass", settings, Throttle(None), transport=in_turn(PARTIAL, OVERPASS_ANSWER, seen=seen)
+    )
+    form = {"data": "[out:json];nwr;out;"}
+    client.post_json("https://overpass.example.org/api/interpreter", form)  # cached unchecked
+
+    result = client.post_json(
+        "https://overpass.example.org/api/interpreter", form, check=overpass_incomplete
+    )
+    assert len(seen) == 2
+    assert not result.from_cache
+    assert result.data == OVERPASS_ANSWER
+
+
+def test_a_partial_answer_is_retried_by_the_engine_and_the_run_succeeds(tmp_path: Path) -> None:
+    seen: list[httpx2.Request] = []
+    workspace = Workspace(tmp_path).ensure()
+    providers = builtin_providers(
+        workspace, AGENT, transport=in_turn(PARTIAL, OVERPASS_ANSWER, seen=seen)
+    )
+    runner = Runner(workspace, providers=providers)
+    spec = validate_spec(
+        {
+            "apiVersion": "geoproduct/v1",
+            "kind": "Pipeline",
+            "name": "clinics",
+            "stages": [
+                {
+                    "id": "clinics",
+                    "uses": "collect.features",
+                    "retry": {"max_attempts": 2, "backoff_s": 0},
+                    "with": {
+                        "provider": "overpass",
+                        "area": {"bbox": list(BOX)},
+                        "tags": {"amenity": None},
+                    },
+                }
+            ],
+        }
+    )
+    record = runner.run(spec)
+    assert record.status == RunStatus.succeeded
+    assert record.stages[0].attempts == 2
+    assert len(seen) == 2
 
 
 def test_overpass_marks_results_cut_off_at_the_limit(tmp_path: Path) -> None:

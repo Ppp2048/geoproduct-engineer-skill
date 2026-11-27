@@ -9,13 +9,15 @@ from typing import Any
 import anyio
 import pytest
 from mcp import Client
+from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecurityMiddleware
 from mcp_types import TextResourceContents
 
 from geoproduct.providers.fixture import AREA_BBOX
 from geoproduct.schemas import Contract
 from geoproduct.stages.quality import CHECKS
 from geoproduct_mcp.calls import call
-from geoproduct_mcp.server import create_server, main
+from geoproduct_mcp.server import create_server, main, transport_security
 from geoproduct_mcp.tools.common import Done, Job, ServerState
 
 TOOLS = {
@@ -142,6 +144,12 @@ def test_resources_describe_the_server(state: ServerState) -> None:
         run = json.loads(text_of(await client.read_resource(f"geoproduct://runs/{run_id}")))
         assert run["run"]["status"] == "pending"
         assert run["events"][0]["event"] == "run_created"
+        # Audit GP-04: a torn last line made this resource fail.
+        log = state.runner.store.run_dir(run_id) / "events.jsonl"
+        with log.open("ab") as handle:
+            handle.write(b'{"ts":"2026-01-01","event":"run_sta')
+        run = json.loads(text_of(await client.read_resource(f"geoproduct://runs/{run_id}")))
+        assert [e["event"] for e in run["events"]] == ["run_created"]
 
     connected(state, check)
 
@@ -188,3 +196,96 @@ def test_a_cancelled_call_sets_the_work_cancel_flag() -> None:
 @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "example.org"])
 def test_http_is_only_served_on_loopback(host: str) -> None:
     assert main(["--http", "--host", host]) == 2
+
+
+def http_statuses(app: Any, requests: list[tuple[str, str | None]]) -> list[int]:
+    """POST each (Host, Origin) request to the Streamable HTTP app in-process, and return
+    the response statuses. The body is not JSON: a request that passes the Host and Origin
+    checks is answered 400."""
+    statuses: list[int] = []
+
+    async def post(host: str, origin: str | None) -> None:
+        headers = [
+            (b"host", host.encode()),
+            (b"content-type", b"application/json"),
+            (b"accept", b"application/json, text/event-stream"),
+        ]
+        if origin is not None:
+            headers.append((b"origin", origin.encode()))
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/mcp",
+            "raw_path": b"/mcp",
+            "query_string": b"",
+            "headers": headers,
+            "client": ("127.0.0.2", 50000),
+            "server": ("127.0.0.2", 8123),
+        }
+        messages = [{"type": "http.request", "body": b"not json", "more_body": False}]
+
+        async def receive() -> dict[str, Any]:
+            return messages.pop(0) if messages else {"type": "http.disconnect"}
+
+        async def send(message: dict[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                statuses.append(message["status"])
+
+        await app(scope, receive, send)
+
+    async def run() -> None:
+        with anyio.fail_after(10):
+            async with app.router.lifespan_context(app):
+                for host, origin in requests:
+                    await post(host, origin)
+
+    anyio.run(run)
+    return statuses
+
+
+def test_another_loopback_address_is_protected_from_dns_rebinding(
+    state: ServerState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit GP-05: the SDK protects only 127.0.0.1, localhost and ::1 by itself. Served on
+    127.0.0.2, a request naming another host or origin was answered."""
+    given: dict[str, Any] = {}
+    monkeypatch.setattr(MCPServer, "run", lambda self, transport, **kw: given.update(kw))
+    args = [
+        "--http",
+        "--host",
+        "127.0.0.2",
+        "--port",
+        "8123",
+        "--workspace",
+        str(state.workspace.root),
+    ]
+    assert main(args) == 0
+    settings = given["transport_security"]
+    app = create_server(state).streamable_http_app(transport_security=settings, host="127.0.0.2")
+    requests = [
+        ("attacker.example:8123", None),
+        ("127.0.0.2:8123", "http://attacker.example"),
+        ("127.0.0.2:8123", "http://127.0.0.2:8123"),
+        ("127.0.0.2:8123", None),
+    ]
+    assert http_statuses(app, requests) == [421, 403, 400, 400]
+
+
+@pytest.mark.parametrize(
+    ("host", "port", "allowed", "refused"),
+    [
+        ("127.0.0.1", 8000, ["127.0.0.1:8000", "localhost:8000", "[::1]:8000"], ["127.0.0.2:8000"]),
+        ("::1", 8000, ["[::1]:8000", "localhost:8000"], ["[::2]:8000"]),
+        ("127.0.0.2", 80, ["127.0.0.2", "127.0.0.2:80"], ["localhost", "127.0.0.1:80"]),
+        ("localhost", 0, ["localhost:51234", "127.0.0.1:51234"], ["example.org:51234"]),
+    ],
+)
+def test_the_allowed_hosts_follow_the_address_served(
+    host: str, port: int, allowed: list[str], refused: list[str]
+) -> None:
+    security = TransportSecurityMiddleware(transport_security(host, port))
+    assert all(security._validate_host(name) for name in allowed)
+    assert not any(security._validate_host(name) for name in refused)

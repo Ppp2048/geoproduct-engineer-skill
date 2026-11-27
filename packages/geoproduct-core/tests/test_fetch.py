@@ -46,13 +46,21 @@ def fetcher(routes: dict[str, httpx2.Response]) -> Fetcher:
         "::ffff:127.0.0.1",
         "0.0.0.0",
         "224.0.0.1",
+        # Audit GP-10: IPv6 addresses that carry a private IPv4 one.
+        "64:ff9b::7f00:1",  # NAT64 to 127.0.0.1
+        "64:ff9b::a00:1",  # NAT64 to 10.0.0.1
+        "64:ff9b::a9fe:a9fe",  # NAT64 to 169.254.169.254
+        "::127.0.0.1",  # IPv4-compatible
+        "::a00:1",
+        "64:ff9b:1::a00:1",  # local-use NAT64 prefix (RFC 8215)
+        "2002:7f00:1::1",  # 6to4
     ],
 )
 def test_private_and_special_addresses_are_not_public(address: str) -> None:
     assert not is_public(address)
 
 
-@pytest.mark.parametrize("address", ["93.184.215.14", "2606:4700::1111"])
+@pytest.mark.parametrize("address", ["93.184.215.14", "2606:4700::1111", "64:ff9b::808:808"])
 def test_global_addresses_are_public(address: str) -> None:
     assert is_public(address)
 

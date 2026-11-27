@@ -22,6 +22,7 @@ from geoproduct.schemas._base import ShortText, Slug, Text
 from geoproduct_mcp.store import DatasetInfo
 from geoproduct_mcp.tools.common import (
     CONFIRM_ABOVE_CALLS,
+    PREVIEW_ITEMS,
     Done,
     ServerState,
     invalid,
@@ -29,6 +30,8 @@ from geoproduct_mcp.tools.common import (
 )
 
 ONE_REQUEST_STAGES = frozenset({"collect.features", "collect.buildings"})
+HAS_OUTPUT = frozenset({StageStatus.succeeded, StageStatus.skipped})
+"""Stages with a finished output: run now, or reused from their checkpoint (``skipped``)."""
 STAGE_CAPABILITY = {
     "collect.features": Capability.features,
     "collect.buildings": Capability.buildings,
@@ -173,6 +176,34 @@ def _plan_output(state: ServerState, record: RunRecord, spec: PipelineSpec) -> P
     )
 
 
+REUSE_NEWEST_RUNS = 20
+"""How many of the newest runs are looked at for a pending run to reuse (audit GP-06)."""
+
+
+def _pending_run(state: ServerState, spec: PipelineSpec) -> RunRecord:
+    """The newest run of exactly this spec that was recorded but never started, or a new one.
+
+    Checking a spec again, or repeating a call that was refused for want of confirmation,
+    then leaves one pending run instead of a new orphan each time (audit GP-06). Only the
+    newest runs are looked at: a retry finds the run its earlier attempt recorded.
+    """
+    spec_sha256 = state.runner.plan(spec).spec_sha256
+    store = state.runner.store
+    for run_id in reversed(store.run_ids()[-REUSE_NEWEST_RUNS:]):
+        try:
+            record = store.load(run_id)
+        except (GeoProductError, OSError, ValueError):
+            continue  # an unreadable run is never reused
+        if (
+            record.spec_sha256 == spec_sha256
+            and record.status == RunStatus.pending
+            and record.started_at is None
+            and not state.jobs.active(run_id)
+        ):
+            return record
+    return state.runner.create(spec)
+
+
 def create_geo_pipeline(
     state: ServerState,
     *,
@@ -181,7 +212,7 @@ def create_geo_pipeline(
     params: Mapping[str, JsonValue] | None = None,
 ) -> Done:
     parsed = with_params(load_spec(state, spec, spec_path), params or {})
-    record = state.runner.create(parsed)
+    record = _pending_run(state, parsed)
     output = _plan_output(state, record, parsed)
     calls = output.estimate
     summary = (
@@ -226,7 +257,7 @@ def run_geo_pipeline(
             )
         changes = params or None
         finished = (
-            frozenset(s.stage_id for s in record.stages if s.status == StageStatus.succeeded)
+            frozenset(s.stage_id for s in record.stages if s.status in HAS_OUTPUT)
             if new_spec == current
             else frozenset()
         )
@@ -234,10 +265,12 @@ def run_geo_pipeline(
     else:
         new_spec = with_params(load_spec(state, spec, spec_path), params or {})
         calls, _ = estimate(state, state.runner.plan(new_spec))
-        run_id = state.runner.create(new_spec).run_id
     for stage in calls.stages:
         if capability := STAGE_CAPABILITY.get(stage.uses):
             state.providers.require(stage.provider, capability)
+    if run_id is None:
+        # Recorded only once the providers are known to work (audit GP-06).
+        run_id = _pending_run(state, new_spec).run_id
     if calls.needs_confirmation and not confirm:
         raise GeoProductError(
             ErrorCode.confirmation_required,
@@ -265,7 +298,7 @@ def run_geo_pipeline(
 def get_pipeline_status(state: ServerState, *, run_id: str) -> Done:
     record = state.runner.status(run_id)
     active = state.jobs.active(run_id)
-    outputs = [f"{run_id}/{s.stage_id}" for s in record.stages if s.status == StageStatus.succeeded]
+    outputs = [f"{run_id}/{s.stage_id}" for s in record.stages if s.status in HAS_OUTPUT]
     note = None
     if record.status == RunStatus.running and not active:
         note = (
@@ -277,8 +310,7 @@ def get_pipeline_status(state: ServerState, *, run_id: str) -> Done:
         if record.error.hint:
             note += f" {record.error.hint}"
     result = RunStatusResult(run=record, active=active, finished_outputs=outputs, note=note)
-    done = sum(1 for s in record.stages if s.status == StageStatus.succeeded)
-    summary = f"Run {run_id} is {record.status.value}: {done} of {len(record.stages)} stage(s) done"
+    summary = f"Run {run_id} is {record.status.value}: {_done(record)}"
     if record.current_stage and record.status == RunStatus.running:
         summary += f", now running '{record.current_stage}'"
     summary += "."
@@ -291,7 +323,7 @@ def get_pipeline_results(state: ServerState, *, run_id: str) -> Done:
     record = state.runner.status(run_id)
     outputs: list[StageOutput] = []
     for stage in record.stages:
-        if stage.status != StageStatus.succeeded:
+        if stage.status not in HAS_OUTPUT:
             continue
         dataset_id = f"{run_id}/{stage.stage_id}"
         info = state.datasets.info(dataset_id)
@@ -300,13 +332,21 @@ def get_pipeline_results(state: ServerState, *, run_id: str) -> Done:
                 stage_id=stage.stage_id,
                 uses=stage.uses,
                 dataset=info,
-                preview=preview(state.datasets.load(dataset_id)),
+                preview=preview(state.datasets.load(dataset_id, limit=PREVIEW_ITEMS)),
             )
         )
     result = RunResults(run_id=run_id, status=record.status, outputs=outputs)
     listed = ", ".join(f"{o.stage_id} ({o.dataset.item_count})" for o in outputs) or "none"
-    summary = f"Run {run_id} is {record.status.value}. Stage outputs: {listed}."
+    summary = f"Run {run_id} is {record.status.value}: {_done(record)}. Stage outputs: {listed}."
     return Done(result, summary)
+
+
+def _done(record: RunRecord) -> str:
+    """How many stages have output, e.g. "4 of 4 stage(s) done, 1 reused from a checkpoint"."""
+    done = sum(1 for s in record.stages if s.status in HAS_OUTPUT)
+    reused = sum(1 for s in record.stages if s.status == StageStatus.skipped)
+    text = f"{done} of {len(record.stages)} stage(s) done"
+    return f"{text}, {reused} reused from a checkpoint" if reused else text
 
 
 def cancel_geo_pipeline(state: ServerState, *, run_id: str) -> Done:

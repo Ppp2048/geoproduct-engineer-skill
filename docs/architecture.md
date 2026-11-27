@@ -169,7 +169,7 @@ Source evaluation needs no stage: the agent's ratings travel on each `Source`, a
 ```
 runs/<run_id>/run.json       # status, per-stage state and counts, errors, library versions
 runs/<run_id>/spec.json      # the spec as run (parameters changed on resume are saved here)
-runs/<run_id>/events.jsonl   # append-only execution log
+runs/<run_id>/events.jsonl   # append-only execution log; a torn line is skipped (decision 78)
 runs/<run_id>/cancel         # present while a cancellation is pending
 runs/<run_id>/stages/<stage_id>/
     manifest.json            # fingerprint, parameters, output hashes, counts, providers used
@@ -203,10 +203,11 @@ cache/http/<provider>/       # cached provider responses
 **Entity resolution** (`resolve.deduplicate`):
 1. **Normalise names and addresses:** case, accents, punctuation, legal suffixes, common abbreviations, plus configurable alias lists.
 2. **Block** candidate pairs by spatial grid cell and name token, to avoid comparing every pair.
-3. **Score each pair** with RapidFuzz token similarity, distance and shared identifiers (website, phone, OSM or GERS id).
-4. **Cluster** with explicit thresholds.
+3. **Score each pair** with RapidFuzz token similarity, distance and shared identifiers. Each identifier value is **site-level** (it names one physical establishment: the keys in `site_keys`, none by default, register codes added per dataset), **organisation-level** (shared by an organisation's sites: `organisation_keys`, default website, phone, email, brand:wikidata, operator:wikidata) or of **unknown meaning**. A `wikidata` item is classified item by item: site-level if listed in `wikidata_sites`, organisation-level if listed in `wikidata_organisations` or given by any record as its brand or operator, unknown otherwise. A site-level or unknown value found on records shown to be distinct sites (farther apart than the distance threshold, at different addresses, or with different site identifiers) is treated as organisation-level. Fields with several values are split and compared value by value. Phone numbers match only when every digit does, after dropping extensions; an international against a national form is unclear and neither confirms nor contradicts.
+4. **Decide each pair:** a duplicate only when site-level evidence (a shared site identifier, or a similar name at an agreeing street address with a house number) confirms it, the names fit, the two are within the distance threshold, and no site-level identifier, Wikidata item of unknown meaning or address differs. Organisation-level evidence never merges on its own, and a differing organisation-level value never blocks a merge: it is kept as a second value or a conflict. A shared Wikidata item of unknown meaning links records like organisation-level evidence. A look-alike that does not merge is a possible duplicate: both records stay, each marked in its `limitations` with the reason.
+5. **Group** so that every pair in a group is a duplicate, strongest link first; records are never chained together through a third.
 
-The output is clusters with reasons. Conflicting attributes are kept side by side and the record is marked `conflicting`, never silently overwritten. One organisation with several sites stays as several records linked by `organisation_id`.
+The output is merged groups with reasons. Conflicting attributes are kept side by side and the record is marked `conflicting`, never silently overwritten. Records with similar names that share an organisation-level identifier stay as several records linked by `organisation_id`, near or far.
 
 **Building matching** (`match.buildings`), in this order:
 1. **Containment:** a footprint contains the point. This alone is `probable`. It becomes `exact` only when a name, address or identifier agrees, or when the point comes from the footprint itself.
@@ -253,7 +254,7 @@ The levels are: high ≥ 0.75, medium ≥ 0.5, low ≥ 0.25. A record without ge
 
 ## 7. MCP server
 
-**Transports.** stdio by default (`geoproduct-mcp`), or Streamable HTTP with `--http` on `127.0.0.1` only, because the server has no authentication (decision 42). The SDK negotiates protocol versions from 2024-11-05 to 2026-07-28. All state lives in the workspace behind server-issued ids (`source_id`, `dataset_id`, `run_id`), so no MCP session state is needed. Large data never travels through the model's context: tools take and return handles plus small previews.
+**Transports.** stdio by default (`geoproduct-mcp`), or Streamable HTTP with `--http` on a loopback address only, `127.0.0.1` by default, because the server has no authentication (decision 42). Whatever loopback address it serves, a request whose `Host` or `Origin` header names another address is refused, which blocks DNS rebinding (decision 75). The SDK negotiates protocol versions from 2024-11-05 to 2026-07-28. All state lives in the workspace behind server-issued ids (`source_id`, `dataset_id`, `run_id`), so no MCP session state is needed. Large data never travels through the model's context: tools take and return handles plus small previews.
 
 **Tools.** The PRD proposed 25; overlapping ones are merged into 20 (decision 38). Stage F added `geocode_records` (decision 55), making 21.
 
@@ -275,17 +276,17 @@ The levels are: high ≥ 0.75, medium ≥ 0.5, low ≥ 0.25. A record without ge
 | Quality | `validate_dataset` | Built-in checks, plus spatial rules against a reference dataset. Merges three proposed validation tools. |
 | | `generate_quality_report` | Markdown and JSON, with the quality score |
 | | `export_geo_dataset` | GeoJSON or CSV, with a manifest. Optionally copied to an allowed folder; never replaces a different file without `overwrite: true`. |
-| Pipelines | `create_geo_pipeline` | Checks a spec and records a pending run, with its plan, an estimate of external requests and warnings (for example, a provider that is not configured) |
-| | `run_geo_pipeline` | Starts a pending run, resumes a failed or cancelled one (with changed parameters if given), or creates and starts a new one. Runs in the background and returns `run_id`. Replaces `resume_geo_pipeline` (decision 39). |
+| Pipelines | `create_geo_pipeline` | Checks a spec and records a pending run, with its plan, an estimate of external requests and warnings (for example, a provider that is not configured). The same spec checked again returns the same pending run (decision 74). |
+| | `run_geo_pipeline` | Starts a pending run, resumes a failed or cancelled one (with changed parameters if given), or creates and starts a new one. Runs in the background and returns `run_id`. Replaces `resume_geo_pipeline` (decision 39). Given a spec, it checks the providers before recording a run, and reuses a pending run of the same spec that never started (decision 74). |
 | | `get_pipeline_status` | |
-| | `get_pipeline_results` | Each finished stage's output as a dataset handle, with a preview |
+| | `get_pipeline_results` | Each finished stage's output as a dataset handle, with a preview read from the start of the output only (decision 79) |
 | | `cancel_geo_pipeline` | |
 
 - **Datasets.** Each tool that produces data returns a `dataset_id` (`ds_…`), item and reject counts, a preview of up to five items and the attribution. A pipeline stage's output is addressed as `<run_id>/<stage_id>` and read in place. Tools check the kind (`records`, `buildings`, `report`, `files`) and explain mismatches. A tool that fails leaves no dataset behind.
 - **Outputs.** Every tool has an output schema; the result is a typed model as structured content, plus a one-line text summary.
 - **Errors.** An error result (`isError`) carries `structuredContent.error` in the `GeoError` shape and the text `code: message`. Validation problems are listed without echoing the input values.
 - **Annotations.** Every tool sets the read-only and open-world hints; tools that write are marked not destructive, and `cancel_geo_pipeline` idempotent.
-- **Progress and cancellation.** Blocking work runs in a worker thread. Progress is forwarded to the client at most twice a second. A cancelled request sets the work's cancel flag, which stages check between items; a provider request already in flight finishes or times out first.
+- **Progress and cancellation.** Blocking work runs in a worker thread. Progress is forwarded to the client at most twice a second. A cancelled request sets the work's cancel flag, which stages check between items; a provider request already in flight finishes or times out first. The worker thread is abandoned, not stopped, so tools check the flag again just before storing anything: a cancelled call keeps nothing (decision 77).
 - **Confirmation.** `run_geo_pipeline` estimates external requests: one per `collect.features` or `collect.buildings` stage, and the provider's largest batch for `geocode.records` (100 on public Nominatim). A stage whose provider sets no limit is counted as unbounded. Above 25 requests, or with anything unbounded, the call needs `confirm: true`; otherwise it fails with `confirmation_required`, and the run stays pending with its id and the estimate in the error (decision 43). `geocode_records` applies the same threshold to the records it would look up (decision 55).
 - **Background runs.** Pipelines run on daemon threads in the server process. If the server stops, the run still says `running` but `get_pipeline_status` reports `active: false`; resume it with `run_geo_pipeline`.
 
@@ -333,6 +334,8 @@ The skill teaches an agent to research, build and check geographic datasets: how
   - an offline CLI run on Sample Town;
   - a plan made without tools;
   - an audit of a CSV with known errors.
+
+  [evaluations.md](evaluations.md) says how to run them by hand: run agents return reports as text, the orchestrator saves them and records who produced and saved each file, and a refused action is reported, never worked around.
 - **Checked by tests** (`tests/skill/`):
   - the frontmatter rules of the specification, the size of `SKILL.md`, links, and no place- or project-specific names;
   - every tool, prompt, parameter, stage, check and error code the skill names exists in the code;
@@ -344,8 +347,8 @@ The skill teaches an agent to research, build and check geographic datasets: how
 - **No code execution.** The server never runs code the model writes. Only registered stages run, and specs have no field that can carry code.
 - **Validated input.** Pipeline specs and tool inputs are validated against their schemas before use. Contracts reject unknown fields.
 - **File access.** Restricted to the workspace and the configured allowed folders. Path traversal and links pointing outside are rejected. Writes are atomic. On Windows, a read or replacement that meets a file another thread has open retries for up to 2 seconds (decision 59).
-- **Network.** Only the configured provider endpoints and `fetch_source_data`. Fetching accepts `http` and `https` only, connects only to public addresses (checked after DNS resolution, on every redirect), honours `robots.txt`, and has an allowlist of content types, a size cap and timeouts.
-- **Transport.** HTTP is served on the loopback interface only; remote serving needs authentication first.
+- **Network.** Only the configured provider endpoints and `fetch_source_data`. Fetching accepts `http` and `https` only, connects only to public addresses (checked after DNS resolution, on every redirect; an IPv6 address that carries an IPv4 one, such as a NAT64 address, is checked as that IPv4 address, decision 76), honours `robots.txt`, and has an allowlist of content types, a size cap and timeouts. Provider error answers are read only as far as their excerpt needs.
+- **Transport.** HTTP is served on the loopback interface only, with DNS-rebinding protection for the address served (decision 75); remote serving needs authentication first.
 - **Confirmation.** Pipelines with many or unbounded external requests need `confirm: true`. No tool deletes data; exports never replace a different file without `overwrite: true`.
 - **Secrets.** Read only from the environment and never written to results, logs or disk. Endpoint URLs that could carry credentials are refused, and configuration errors never repeat the value.
 

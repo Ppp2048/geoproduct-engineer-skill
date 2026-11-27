@@ -71,6 +71,13 @@ class Job:
     progress: ProgressFn | None = None
 
 
+def stop_if_cancelled(job: Job) -> None:
+    """Raise if the call was cancelled. Tools call it before storing anything, because the
+    worker thread of a cancelled request is abandoned, not stopped (audit GP-07)."""
+    if job.cancel.is_set():
+        raise GeoProductError(ErrorCode.cancelled, "The operation was cancelled.")
+
+
 @dataclass
 class Done:
     """A tool's result: the structured output and a one-paragraph summary for the model."""
@@ -178,6 +185,8 @@ def run_stage(
         )
         result = definition(ctx, data, parsed)
         output = adjust(result.data) if adjust else result.data
+        # A cancelled call can still be running here (its thread is abandoned): keep nothing.
+        stop_if_cancelled(job)
         info = state.datasets.commit(
             dataset_id,
             output,

@@ -20,7 +20,7 @@ uv run geoproduct-mcp --help
 | stdio (default) | `geoproduct-mcp` | A local client starts the server as a subprocess. This is the normal setup. |
 | Streamable HTTP | `geoproduct-mcp --http [--port 8000]` | One long-running server on `http://127.0.0.1:8000/mcp`, shared by local clients |
 
-**HTTP is loopback-only.** The server has no authentication, so `--host` must be a loopback address (`127.0.0.1` or `::1`); any other host exits with code 2. Serving remote users would need the MCP authorization flow (OAuth 2.1), plus per-user workspaces and quotas. None of that exists yet, so remote serving is not offered.
+**HTTP is loopback-only.** The server has no authentication, so `--host` must be a loopback address (`127.0.0.1` or `::1`); any other host exits with code 2. Requests must name the address served in their `Host` header, and in `Origin` if they send one; others are refused (421 or 403), which protects the server from DNS rebinding. `127.0.0.1`, `localhost` and `::1` accept one another. Serving remote users would need the MCP authorization flow (OAuth 2.1), plus per-user workspaces and quotas. None of that exists yet, so remote serving is not offered.
 
 **Command-line options.**
 
@@ -114,7 +114,7 @@ The skill tells the agent how to research, match and validate; the MCP server (a
 |---|---|
 | Files | Reads and writes inside the workspace; reads from and exports to `GEOPRODUCT_ALLOWED_DIRS` and `--allow` folders. Path traversal and links pointing outside are refused. |
 | Provider endpoints | Only the configured Nominatim and Overpass URLs, through the throttle and cache. |
-| `fetch_source_data` | `http` and `https` URLs on public addresses only: private, loopback, link-local and other special addresses are refused at connection time, after DNS resolution and on every redirect. It honours `robots.txt`, accepts HTML, text, CSV, JSON, GeoJSON, XML and PDF (evidence excerpts can be checked against all of them except PDF, whose text is not extracted), and stops at 20 MB, 30 seconds and 5 redirects. |
+| `fetch_source_data` | `http` and `https` URLs on public addresses only: private, loopback, link-local and other special addresses are refused at connection time, after DNS resolution and on every redirect, as are IPv6 addresses that carry one (IPv4-mapped, NAT64 `64:ff9b::/96`, IPv4-compatible). It honours `robots.txt`, accepts HTML, text, CSV, JSON, GeoJSON, XML and PDF (evidence excerpts can be checked against all of them except PDF, whose text is not extracted), and stops at 20 MB, 30 seconds and 5 redirects. |
 | Large workloads | A pipeline estimated at more than 25 external requests, or with no upper bound, needs `confirm: true` (see `run_geo_pipeline`), and so does `geocode_records` on more than 25 records with an online geocoder. |
 
 ## Workspace layout

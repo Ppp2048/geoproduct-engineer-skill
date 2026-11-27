@@ -6,7 +6,9 @@ appears at least once:
 
 - streets on a 200 m grid, with numbered house addresses on the avenues;
 - footprints, some named, some not;
-- a hospital mapped twice by different sources, which disagree on its bed count;
+- two hospital records 11 m apart, "Sample General Hospital" and "Sample General
+  Hosp.", with the same website and different bed counts. Nothing in them shows
+  whether they are one site or two: no address, register code or site identifier;
 - an office company with two far-apart sites sharing one website;
 - a clinic between two buildings (an ambiguous building match), a clinic in a park
   (no building at all), and a cafe just outside an unnamed building;

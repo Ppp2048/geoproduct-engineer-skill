@@ -122,14 +122,19 @@ class DatasetStore:
             return self._run_output_info(*match.groups())
         raise _unknown_dataset(dataset_id)
 
-    def load(self, dataset_id: str) -> StageData:
+    def load(self, dataset_id: str, *, limit: int | None = None) -> StageData:
+        """A stored dataset; with ``limit``, only its first items, for a preview (audit
+        GP-09)."""
         if DATASET_ID.match(dataset_id):
             info = self.info(dataset_id)
-            return stage_data.load(info.kind, self.workspace.path("datasets", dataset_id))
+            folder = self.workspace.path("datasets", dataset_id)
+            if limit is not None:
+                return stage_data.head(info.kind, folder, limit)
+            return stage_data.load(info.kind, folder)
         if match := RUN_OUTPUT_ID.match(dataset_id):
             run_id, stage_id = match.groups()
             self._run_output_info(run_id, stage_id)
-            return self.runner.output(run_id, stage_id)
+            return self.runner.output(run_id, stage_id, limit=limit)
         raise _unknown_dataset(dataset_id)
 
     def _run_output_info(self, run_id: str, stage_id: str) -> DatasetInfo:

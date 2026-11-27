@@ -11,6 +11,7 @@ fingerprint or output hashes no longer match, the stage runs again.
 """
 
 import json
+import os
 import re
 import shutil
 from datetime import UTC, datetime
@@ -79,16 +80,33 @@ class RunStore:
 
     def event(self, run_id: str, event: str, **fields: object) -> None:
         entry = {"ts": now().isoformat(timespec="milliseconds"), "event": event, **fields}
-        line = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
-        with (self.run_dir(run_id) / "events.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        line = json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        with (self.run_dir(run_id) / "events.jsonl").open("a+b") as handle:
+            end = handle.seek(0, os.SEEK_END)
+            if end:
+                handle.seek(end - 1)
+                if handle.read(1) != b"\n":
+                    # A process died mid-write: end its torn line, so this event keeps a
+                    # line of its own (audit GP-04).
+                    line = b"\n" + line
+            handle.write(line + b"\n")
 
     def events(self, run_id: str) -> list[dict[str, Any]]:
+        """The run's events, oldest first. A line that is not a JSON object, such as one torn
+        when a process died mid-write, is skipped (audit GP-04)."""
         path = self.run_dir(run_id) / "events.jsonl"
         if not path.is_file():
             return []
-        lines = Workspace.read_text(path).splitlines()
-        return [json.loads(line) for line in lines if line.strip()]
+        text = Workspace.read_bytes(path).decode("utf-8", errors="replace")
+        events: list[dict[str, Any]] = []
+        for line in text.splitlines():
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(entry, dict):
+                events.append(entry)
+        return events
 
     def stage_dir(self, run_id: str, stage_id: str) -> Path:
         return self.run_dir(run_id) / "stages" / stage_id

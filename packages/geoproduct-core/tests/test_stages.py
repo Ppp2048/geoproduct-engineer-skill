@@ -239,14 +239,61 @@ def test_combine_appends_records_and_rejects_repeated_ids(env: Env) -> None:
     assert result.input_count == 3
 
 
-def test_deduplicate_merges_and_keeps_disagreements(env: Env) -> None:
+def test_the_fixture_hospital_records_share_only_a_website(env: Env) -> None:
+    """Sample Town has two hospital records 11 m apart, "Sample General Hospital" and
+    "Sample General Hosp.". They share a website, which an organisation's sites can share,
+    and no address, register code or other site identifier. Nothing shows they are one
+    site, so they stay two records: one organisation, marked for review."""
     hospitals = env.records(
         "collect.features", provider="fixture", area=AREA, tags={"amenity": "hospital"}
     )
-    merged = env.records("resolve.deduplicate", hospitals)
+    result = env.run("resolve.deduplicate", hospitals)
+    records = by_id(result.data)
+    assert sorted(records) == ["fixture:poi-01", "fixture:poi-02", "fixture:poi-03"]
+    first, second = records["fixture:poi-01"], records["fixture:poi-02"]
+    assert not first.merged
+    assert not second.merged
+    assert first.organisation_id is not None
+    assert first.organisation_id == second.organisation_id
+    assert records["fixture:poi-03"].organisation_id is None
+    assert [first.attributes["beds"].value, second.attributes["beds"].value] == [110, 120]
+    assert not first.conflicts
+    [line] = possible_of(first)
+    assert line == (
+        "Possible duplicate of fixture:poi-02 (same website; name similarity 1.00; 11 m apart; "
+        "not merged because they share only organisation-level details (website), which do "
+        "not identify a site)."
+    )
+    assert possible_of(second)[0].startswith("Possible duplicate of fixture:poi-01 (")
+    assert result.notes == [
+        "merged 0 duplicate record(s)",
+        "linked 1 multi-site organisation(s)",
+        "kept 1 possible duplicate pair(s) apart for review",
+    ]
+
+
+def test_a_site_identifier_merges_and_keeps_disagreements(env: Env) -> None:
+    """With a site-level identifier, such as a health register code, the same two records
+    merge, and their bed counts are both kept."""
+    hospitals = env.records(
+        "collect.features", provider="fixture", area=AREA, tags={"amenity": "hospital"}
+    )
+    register = {"register": "HOSP-0001"}
+    with_code = hospitals.model_copy(
+        update={
+            "records": [
+                r.model_copy(update={"external_ids": {**r.external_ids, **register}})
+                if r.id in {"fixture:poi-01", "fixture:poi-02"}
+                else r
+                for r in hospitals.records
+            ]
+        }
+    )
+    merged = env.records("resolve.deduplicate", with_code, site_keys=["register"])
     assert len(merged.records) == 2
     hospital = next(r for r in merged.records if r.merged)
     assert hospital.name == "Sample General Hospital"
+    assert "same register" in hospital.merged[0].reasons
     assert hospital.status == RecordStatus.conflicting
     assert [c.field for c in hospital.conflicts] == ["attributes.beds"]
     assert hospital.attributes["beds"].value is None
@@ -268,18 +315,292 @@ def test_merging_keeps_the_fuller_spelling_of_a_website(env: Env) -> None:
             "id": "a",
             "name": "Example Clinic",
             "geometry": point(0.003, 0.003),
-            "external_ids": {"website": "example.org"},
+            "external_ids": {"website": "example.org", "wikidata": "Q4115189"},
         },
         {
             "id": "b",
             "name": "Example Clinic",
             "geometry": point(0.00301, 0.003),
-            "external_ids": {"website": "https://www.example.org/"},
+            "external_ids": {"website": "https://www.example.org/", "wikidata": "Q4115189"},
         },
     )
-    merged = env.records("resolve.deduplicate", data).records
+    merged = env.records("resolve.deduplicate", data, wikidata_sites=[SITE_ITEM]).records
     assert len(merged) == 1
-    assert merged[0].external_ids == {"website": "https://www.example.org/"}
+    assert merged[0].external_ids == {
+        "website": "https://www.example.org/",
+        "wikidata": "Q4115189",
+    }
+
+
+STEP = 0.0009
+"""About 100 m east-west near 0°, 0°."""
+
+SITE_ITEM = "Q4115189"
+"""An invented Wikidata item the tests name in ``wikidata_sites``: one establishment."""
+
+
+def clinic(rid: str, east: float, **fields: Any) -> dict[str, Any]:
+    """An "Example Clinic" ``east`` steps of about 100 m east of a fixed point."""
+    where = point(0.003 + east * STEP, 0.003)
+    return {"id": rid, "name": "Example Clinic", "geometry": where, **fields}
+
+
+def possible_of(record: Record) -> list[str]:
+    return [x for x in record.limitations if x.startswith("Possible duplicate of ")]
+
+
+def test_a_chain_of_nearby_same_name_records_is_not_merged(env: Env) -> None:
+    """Five branches 100 m apart: each is near its neighbours, the ends are 400 m apart. A
+    similar name nearby confirms nothing, and a chain of near pairs never joins its ends."""
+    data = recordset(*(clinic(f"c{k}", k) for k in range(5)))
+    result = env.run("resolve.deduplicate", data)
+    records = by_id(result.data)
+    assert sorted(records) == ["c0", "c1", "c2", "c3", "c4"]
+    assert not any(r.merged for r in records.values())
+    assert [len(possible_of(records[f"c{k}"])) for k in range(5)] == [1, 2, 2, 2, 1]
+    [line] = possible_of(records["c0"])
+    assert line == (
+        "Possible duplicate of c1 (name similarity 1.00; 100 m apart; not merged because no "
+        "site-level identifier or matching address confirms it)."
+    )
+    assert "merged 0 duplicate record(s)" in result.notes
+    assert "kept 4 possible duplicate pair(s) apart for review" in result.notes
+
+
+def test_a_merged_group_needs_every_pair_to_match(env: Env) -> None:
+    """A shares a Wikidata item known to name a site with B, and B an address with C, but
+    nothing confirms A and C are one place. The stronger pair merges; C stays apart, marked
+    for review on both."""
+    address = {"house_number": "1", "street": "Hospital Road"}
+    data = recordset(
+        clinic("a", 0, external_ids={"wikidata": SITE_ITEM}),
+        clinic("b", 0.1, external_ids={"wikidata": SITE_ITEM}, address=address),
+        clinic("c", 0.4, address=address),
+    )
+    merged, kept = env.records("resolve.deduplicate", data, wikidata_sites=[SITE_ITEM]).records
+    assert (merged.id, kept.id) == ("a", "c")
+    assert [m.record_id for m in merged.merged] == ["b"]
+    assert "same wikidata" in merged.merged[0].reasons
+    assert not kept.merged
+    for record, other in ((kept, "a"), (merged, "c")):
+        [line] = possible_of(record)
+        assert line.startswith(f"Possible duplicate of {other} (same address; ")
+        assert line.endswith(
+            "not merged because the records merged with one of them do not all match the other)."
+        )
+
+
+def test_records_that_all_match_each_other_still_merge(env: Env) -> None:
+    wikidata = {"external_ids": {"wikidata": SITE_ITEM}}
+    data = recordset(*(clinic(rid, k * 0.1, **wikidata) for k, rid in enumerate("abc")))
+    [merged] = env.records("resolve.deduplicate", data, wikidata_sites=[SITE_ITEM]).records
+    assert sorted(m.record_id for m in merged.merged) == ["b", "c"]
+    assert not possible_of(merged)
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "params", "reason"),
+    [
+        (
+            {"external_ids": {"wikidata": SITE_ITEM}},
+            {"external_ids": {"wikidata": SITE_ITEM}},
+            {"wikidata_sites": [SITE_ITEM]},
+            "same wikidata",
+        ),
+        (
+            {"external_ids": {"register": "HF-0042"}},
+            {"external_ids": {"register": "HF-0042"}},
+            {"site_keys": ["register"]},
+            "same register",
+        ),
+        (
+            {"external_ids": {"register": "HF-0042"}},
+            {"external_ids": {"register": "HF-0042"}},
+            {"id_keys": ["website", "register"]},
+            "same register",
+        ),
+        (
+            {"address": {"house_number": "1", "street": "Hospital Road"}},
+            {"address": {"full": "1 Hospital Rd"}},
+            {},
+            "same address",
+        ),
+    ],
+    ids=["wikidata-site-item", "site-key", "older-id-keys", "address"],
+)
+def test_a_site_identifier_or_address_confirms_a_duplicate(
+    env: Env, first: dict[str, Any], second: dict[str, Any], params: dict[str, Any], reason: str
+) -> None:
+    data = recordset(clinic("a", 0, **first), clinic("b", 0.2, **second))
+    [merged] = env.records("resolve.deduplicate", data, **params).records
+    [merge] = merged.merged
+    assert reason in merge.reasons
+    assert not possible_of(merged)
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "why"),
+    [
+        (
+            {"external_ids": {"wikidata": "Q1000001"}, "address": {"full": "1 Hospital Road"}},
+            {"external_ids": {"wikidata": "Q1000002"}, "address": {"full": "1 Hospital Road"}},
+            "they differ in wikidata",
+        ),
+        (
+            {"external_ids": {"website": "example.org"}, "address": {"full": "1 Hospital Road"}},
+            {"external_ids": {"website": "example.org"}, "address": {"full": "9 Hospital Road"}},
+            "they differ in address",
+        ),
+        (
+            {"address": {"house_number": "1", "street": "Hospital Road", "postcode": "AB1 2CD"}},
+            {"address": {"house_number": "1", "street": "Hospital Road", "postcode": "XY9 8ZZ"}},
+            "they differ in address",
+        ),
+    ],
+    ids=["wikidata", "address", "postcode"],
+)
+def test_conflicting_evidence_keeps_records_apart_for_review(
+    env: Env, first: dict[str, Any], second: dict[str, Any], why: str
+) -> None:
+    data = recordset(clinic("a", 0, **first), clinic("b", 0.2, **second))
+    result = env.run("resolve.deduplicate", data)
+    a, b = result.data.records
+    assert not a.merged
+    assert not b.merged
+    [line] = possible_of(a)
+    assert line.startswith("Possible duplicate of b (")
+    assert line.endswith(f"not merged because {why}).")
+    assert possible_of(b)[0].startswith("Possible duplicate of a (")
+    assert "kept 1 possible duplicate pair(s) apart for review" in result.notes
+
+
+def test_different_organisation_details_do_not_keep_one_address_apart(env: Env) -> None:
+    """One street address, two records: a direct line and a central booking line, two
+    websites. Phone numbers and websites are organisation-level, so they do not show two
+    sites. The records merge and both values are kept."""
+    address = {"house_number": "1", "street": "Hospital Road"}
+    data = recordset(
+        clinic("a", 0, address=address, external_ids={"phone": "020 7946 0958"}),
+        clinic(
+            "b",
+            0.2,
+            address=address,
+            external_ids={"phone": "0300 123 4567", "website": "example.org"},
+        ),
+    )
+    result = env.run("resolve.deduplicate", data)
+    [merged] = result.data.records
+    assert merged.merged[0].reasons[:2] == ["same address", "different phone"]
+    assert merged.external_ids == {
+        "phone": "020 7946 0958",
+        "phone~2": "0300 123 4567",
+        "website": "example.org",
+    }
+    assert result.notes[0] == "merged 1 duplicate record(s)"
+
+
+def test_branches_sharing_a_wikidata_item_of_unknown_meaning_are_reported(env: Env) -> None:
+    """Three branches 60 m apart carry one Wikidata item. Nothing says whether it names the
+    establishment or the chain, so they are linked, not merged, and the stage says how to
+    classify it."""
+    item = {"external_ids": {"wikidata": "Q1000001"}}
+    data = recordset(*(clinic(rid, k * 0.6, **item) for k, rid in enumerate("abc")))
+    result = env.run("resolve.deduplicate", data)
+    assert len(result.data.records) == 3
+    assert result.notes == [
+        "merged 0 duplicate record(s)",
+        "linked 1 multi-site organisation(s)",
+        "kept 3 possible duplicate pair(s) apart for review",
+        "merged nothing on 1 shared Wikidata item(s) of unknown meaning: list items that name "
+        "one establishment in wikidata_sites, or organisations in wikidata_organisations",
+    ]
+    classified = env.run("resolve.deduplicate", data, wikidata_organisations=["Q1000001"])
+    assert classified.notes[:3] == result.notes[:3]
+    assert len(classified.notes) == 3
+    one_site = env.records("resolve.deduplicate", data, wikidata_sites=["Q1000001"])
+    assert len(one_site.records) == 1
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{}, {"id_keys": ["website", "phone", "email", "wikidata"]}, {"site_keys": ["register"]}],
+    ids=["defaults", "older-id-keys", "site-keys-only"],
+)
+def test_an_organisation_identifier_links_but_never_merges(
+    env: Env, params: dict[str, Any]
+) -> None:
+    shared = {"external_ids": {"website": "example.org", "phone": "+44 20 7946 0958"}}
+    data = recordset(clinic("a", 0, **shared), clinic("b", 0.2, **shared))
+    result = env.run("resolve.deduplicate", data, **params)
+    a, b = result.data.records
+    assert not a.merged
+    assert a.organisation_id is not None
+    assert a.organisation_id == b.organisation_id
+    assert result.notes == [
+        "merged 0 duplicate record(s)",
+        "linked 1 multi-site organisation(s)",
+        "kept 1 possible duplicate pair(s) apart for review",
+    ]
+
+
+def test_a_key_cannot_be_both_site_and_organisation_level() -> None:
+    params = STAGES["resolve.deduplicate"].params
+    with pytest.raises(ValueError, match="website cannot be both"):
+        params.model_validate({"site_keys": ["website"], "organisation_keys": ["website"]})
+    settings = params.model_validate({"site_keys": ["website", "register"]}).settings()
+    assert settings.site_keys == ("website", "register")
+    assert settings.organisation_keys == ("phone", "email", "brand:wikidata", "operator:wikidata")
+
+
+@pytest.mark.parametrize(
+    ("given", "error"),
+    [
+        ({"site_keys": ["wikidata"]}, "wikidata cannot be a site key"),
+        (
+            {"site_keys": ["brand:wikidata"], "organisation_keys": ["phone"]},
+            "brand:wikidata cannot be a site key",
+        ),
+        (
+            {"wikidata_sites": ["Q1"], "wikidata_organisations": ["q1"]},
+            "Q1 cannot be both in wikidata_sites and in wikidata_organisations",
+        ),
+        ({"wikidata_sites": ["Hospital"]}, "String should match pattern"),
+        ({"wikidata_organisations": ["Q0"]}, "String should match pattern"),
+    ],
+    ids=["wikidata-site-key", "brand-site-key", "item-in-both-lists", "not-an-item", "q0"],
+)
+def test_wikidata_items_are_classified_one_by_one(given: dict[str, Any], error: str) -> None:
+    params = STAGES["resolve.deduplicate"].params
+    with pytest.raises(ValueError, match=error):
+        params.model_validate(given)
+
+
+def test_the_older_id_keys_list_leaves_wikidata_unclassified() -> None:
+    params = STAGES["resolve.deduplicate"].params
+    settings = params.model_validate(
+        {"id_keys": ["website", "register", "wikidata"], "wikidata_sites": [" q42 "]}
+    ).settings()
+    assert settings.site_keys == ("register",)
+    assert settings.organisation_keys == ("website",)
+    assert settings.wikidata_sites == frozenset({"Q42"})
+
+
+def test_a_spread_site_identifier_is_reported(env: Env) -> None:
+    brand = {"external_ids": {"wikidata": SITE_ITEM}}
+    data = recordset(clinic("a", 0, **brand), clinic("b", 20, **brand))
+    result = env.run("resolve.deduplicate", data)
+    assert len(result.data.records) == 2
+    assert result.notes[-1] == (
+        "compared 1 identifier value(s) as organisation-level: records at distinct sites (more "
+        "than 150 m apart, at different addresses, or with different site identifiers) carry each"
+    )
+
+
+def test_a_record_lists_at_most_five_possible_duplicates(env: Env) -> None:
+    data = recordset(*(clinic(f"c{k}", k * 0.1) for k in range(7)))
+    lines = possible_of(by_id(env.records("resolve.deduplicate", data))["c0"])
+    assert len(lines) == 6
+    assert lines[-1] == "Possible duplicate of 1 more record(s)."
 
 
 def test_geocode_locates_addresses_and_leaves_misses_unresolved(env: Env) -> None:
@@ -336,6 +657,7 @@ def test_building_matches_say_how_sure_they_are(env: Env, town: dict[str, Any]) 
     status = {r.name: r.building_match.status for r in matched.records if r.building_match}
     assert status == {
         "Sample General Hospital": MatchStatus.exact,
+        "Sample General Hosp.": MatchStatus.exact,
         "Northside Hospital": MatchStatus.probable,
         "Riverside Clinic": MatchStatus.ambiguous,
         "Hilltop Clinic": MatchStatus.none,

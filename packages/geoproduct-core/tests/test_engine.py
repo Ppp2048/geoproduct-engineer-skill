@@ -162,6 +162,25 @@ def test_run_writes_outputs_manifests_and_events(tmp_path: Path) -> None:
     assert h.runner.status(record.run_id).status == RunStatus.succeeded
 
 
+def test_a_torn_event_line_is_skipped_and_ended(tmp_path: Path) -> None:
+    """Audit GP-04: a line torn by a process killed mid-write made every read of the log
+    fail, and the next event was appended onto it. The torn line now cuts a multi-byte
+    character in half, as a real one can."""
+    h = Harness(tmp_path, make_stage())
+    record = h.run([MAKE])
+    log = h.runner.store.run_dir(record.run_id) / "events.jsonl"
+    with log.open("ab") as handle:
+        handle.write('{"ts":"2026-01-01","event":"stage_retry","note":"café'.encode()[:-1])
+    kinds = [e["event"] for e in h.events(record.run_id)]
+    assert kinds[-1] == "run_succeeded"
+
+    h.runner.store.event(record.run_id, "after_the_tear", n=1)
+    events = h.events(record.run_id)
+    assert [e["event"] for e in events] == [*kinds, "after_the_tear"]
+    assert events[-1]["n"] == 1
+    assert log.read_bytes().endswith(b"\n")
+
+
 def test_failed_run_resumes_from_checkpoints(tmp_path: Path) -> None:
     calls: list[str] = []
     flaky = records_stage("test.flaky", failing([ErrorCode.invalid_input]))
